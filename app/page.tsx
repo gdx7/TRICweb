@@ -154,16 +154,41 @@ export default function Page() {
     return [0, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter(v => v <= yCap);
   }, [yCap]);
 
-  const topPartners = useMemo(() => {
-    return [...partners].sort((a, b) => b.rawY - a.rawY).slice(0, 10);
-  }, [partners]);
-
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!query) return;
     const match = allGenes.find(g => g.toLowerCase() === query.toLowerCase()) ||
       allGenes.find(g => g.toLowerCase().includes(query.toLowerCase()));
     if (match) setFocal(match);
+  }
+
+  async function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const { data } = Papa.parse<Pair>(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
+    const rows = (data as any[]).filter(r => r.ref && r.target);
+    setData(prev => ({ ...prev, pairs: rows as Pair[] }));
+    setLoadedPairsName(file.name);
+  }
+  async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const { data } = Papa.parse<any>(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
+    const rows: Annotation[] = (data as any[])
+      .filter(r => r.gene_name && (r.start != null) && (r.end != null))
+      .map(r => ({
+        gene_name: String(r.gene_name),
+        start: Number(r.start),
+        end: Number(r.end),
+        feature_type: r.feature_type,
+        strand: r.strand,
+        chromosome: r.chromosome
+      }));
+    setData(prev => ({ ...prev, annotations: rows }));
+    setLoadedAnnoName(file.name);
+    if (rows.length > 0) setFocal(rows[0].gene_name);
   }
 
   function downloadSVG() {
@@ -180,43 +205,8 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
-  function parsePairsCSV(csv: string) {
-    const { data } = Papa.parse<Pair>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
-    const rows = (data as any[]).filter(r => r.ref && r.target);
-    return rows as Pair[];
-  }
-  function parseAnnoCSV(csv: string) {
-    const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
-    const rows: Annotation[] = (data as any[]).filter(r => r.gene_name && (r.start != null) && (r.end != null)).map(r => ({
-      gene_name: String(r.gene_name),
-      start: Number(r.start),
-      end: Number(r.end),
-      feature_type: r.feature_type,
-      strand: r.strand,
-      chromosome: r.chromosome
-    }));
-    return rows;
-  }
-  async function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const parsed = parsePairsCSV(text);
-    setData(prev => ({ ...prev, pairs: parsed }));
-    setLoadedPairsName(file.name);
-  }
-  async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const parsed = parseAnnoCSV(text);
-    setData(prev => ({ ...prev, annotations: parsed }));
-    setLoadedAnnoName(file.name);
-    if (parsed.length > 0) setFocal(parsed[0].gene_name);
-  }
-
   return (
-    <div className="min-h-screen bg-white text-gray-900">
+    <div>
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-3">
           <div className="text-xl font-semibold">TRIC-seq Interactome Explorer</div>
@@ -225,6 +215,7 @@ export default function Page() {
       </header>
 
       <main className="mx-auto max-w-7xl p-4 grid grid-cols-12 gap-4">
+        {/* Controls */}
         <div className="col-span-12 lg:col-span-3 space-y-4">
           <section className="border rounded-2xl p-4 shadow-sm">
             <div className="font-semibold mb-2">Search</div>
@@ -291,16 +282,17 @@ export default function Page() {
             <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} />
             <div className="text-xs text-gray-500">{loadedAnnoName || "(using simulated annotations)"}</div>
             <p className="text-[11px] text-gray-500 mt-2">
-              Expected headers: Pairs includes ref,target,counts,odds_ratio,adjusted_score,… | Annotations includes gene_name,start,end,feature_type,strand,chromosome
+              Expected headers — Pairs: ref,target,counts,odds_ratio,adjusted_score,… | Annotations: gene_name,start,end,feature_type,strand,chromosome
             </p>
           </section>
         </div>
 
+        {/* Scatter + table */}
         <div className="col-span-12 lg:col-span-9 space-y-4">
           <section className="border rounded-2xl p-4 shadow-sm">
             <ScatterPlot
               focal={focal}
-              focalAnn={focalAnn}
+              focalAnn={geneIndex[focal]}
               partners={partners}
               genomeMax={genomeMax}
               yCap={yCap}
@@ -433,8 +425,7 @@ function ScatterPlot({ focal, focalAnn, partners, genomeMax, yCap, yTicks, label
           {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => (
             <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
               <circle r={sizeScale(p.counts)} fill="#fff" stroke={pickColor(p.type)} strokeWidth={2}
-                className="cursor-pointer hover:opacity-80" onClick={() => onClickPartner(p.partner)}>
-              </circle>
+                className="cursor-pointer hover:opacity-80" onClick={() => onClickPartner(p.partner)} />
               <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.1} />
             </g>
           ))}
@@ -449,7 +440,7 @@ function ScatterPlot({ focal, focalAnn, partners, genomeMax, yCap, yTicks, label
         <g transform={`translate(${width-170},${20})`}>
           <text className="text-[11px] fill-gray-800">Feature type</text>
           {Object.entries(FEATURE_COLORS).slice(0,7).map(([k, color], i) => (
-            <g key={k} transform={`translate(0,${14 + i*14})`)}>
+            <g key={k} transform={`translate(0,${14 + i*14})`}>
               <circle r={5} cx={6} cy={6} fill="#fff" stroke={color} strokeWidth={2} />
               <text x={18} y={10} className="text-[10px] fill-gray-700">{k}</text>
             </g>

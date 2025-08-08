@@ -4,7 +4,16 @@ import React, { useMemo, useState, useRef } from "react";
 import Papa from "papaparse";
 import "../styles/globals.css";
 
-type FeatureType = "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | string;
+type FeatureType =
+  | "CDS"
+  | "5'UTR"
+  | "3'UTR"
+  | "ncRNA"
+  | "tRNA"
+  | "rRNA"
+  | "sRNA"
+  | "hkRNA"
+  | string;
 
 type Annotation = {
   gene_name: string;
@@ -19,17 +28,15 @@ type Pair = {
   ref: string;
   target: string;
   counts?: number;
-  odds_ratio?: number;
-  adjusted_score?: number;
-  totals?: number;
-  total_ref?: number;
+  odds_ratio?: number; // used everywhere as strength
   ref_type?: FeatureType;
   target_type?: FeatureType;
 };
 
 const FEATURE_COLORS: Record<FeatureType, string> = {
+  // sRNA and ncRNA share the SAME magenta
   ncRNA: "#A40194",
-  sRNA: "#B84AE2",
+  sRNA: "#A40194",
   sponge: "#F12C2C",
   tRNA: "#82F778",
   hkRNA: "#C4C5C5",
@@ -53,8 +60,8 @@ function simulateData(nGenes = 500) {
     const name = ft === "sRNA" ? `sRNA_${i}` : `gene_${i}`;
     ann.push({ gene_name: name, start, end, feature_type: ft, strand: rng() > 0.5 ? "+" : "-", chromosome: "chr" });
   }
-  ann.push({ gene_name: "GcvB", start: 3500000, end: 3500600, feature_type: "sRNA", strand: "+", chromosome: "chr" });
-  ann.push({ gene_name: "CpxQ", start: 1800000, end: 1800480, feature_type: "sRNA", strand: "+", chromosome: "chr" });
+  ann.push({ gene_name: "GcvB", start: 3_500_000, end: 3_500_600, feature_type: "sRNA", strand: "+", chromosome: "chr" });
+  ann.push({ gene_name: "CpxQ", start: 1_800_000, end: 1_800_480, feature_type: "sRNA", strand: "+", chromosome: "chr" });
 
   const pairs: Pair[] = [];
   const genes = ann.map(a => a.gene_name);
@@ -64,13 +71,17 @@ function simulateData(nGenes = 500) {
     const aAnn = ann.find(x => x.gene_name === a);
     const bAnn = ann.find(x => x.gene_name === b);
     pairs.push({
-      ref: a, target: b, counts: c, odds_ratio: or, adjusted_score: or,
-      ref_type: aAnn?.feature_type, target_type: bAnn?.feature_type,
+      ref: a,
+      target: b,
+      counts: c,
+      odds_ratio: or,
+      ref_type: aAnn?.feature_type,
+      target_type: bAnn?.feature_type,
     });
   }
   for (let k = 0; k < nGenes * 2; k++) {
     const a = genes[Math.floor(rng() * genes.length)];
-    let b = genes[Math.floor(rng() * genes.length)];
+    const b = genes[Math.floor(rng() * genes.length)];
     if (a === b) continue;
     addEdge(a, b, 1);
   }
@@ -90,13 +101,37 @@ function symlog(y: number, linthresh = 10, base = Math.E) {
 export default function Page() {
   const [data, setData] = useState(() => simulateData(500));
   const [focal, setFocal] = useState<string>("GcvB");
+
+  // filters
   const [minCounts, setMinCounts] = useState(5);
   const [minDistance, setMinDistance] = useState(5000);
   const [yCap, setYCap] = useState(5000);
   const [labelThreshold, setLabelThreshold] = useState(50);
-  const [weightCol, setWeightCol] = useState<"odds_ratio" | "adjusted_score">("odds_ratio");
-  const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["rRNA", "tRNA"]);
+
+  // table filters/sorts
+  const [minOR, setMinOR] = useState(0);
+  const [minCnt, setMinCnt] = useState(0);
+  const [coordMin, setCoordMin] = useState(0);
+  const [coordMax, setCoordMax] = useState<number | null>(null);
+  const [sortBy, setSortBy] = useState<"or" | "counts" | "pos">("or");
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+
+  // search + highlight
   const [query, setQuery] = useState("");
+  const [highlightInput, setHighlightInput] = useState("");
+  const highlightSet = useMemo(
+    () =>
+      new Set(
+        highlightInput
+          .split(/[, \n]+/)
+          .map(s => s.trim())
+          .filter(Boolean)
+      ),
+    [highlightInput]
+  );
+
+  // types to exclude from map
+  const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["rRNA", "tRNA"]);
 
   const filePairsRef = useRef<HTMLInputElement>(null);
   const fileAnnoRef = useRef<HTMLInputElement>(null);
@@ -112,90 +147,92 @@ export default function Page() {
     return idx;
   }, [annotations]);
 
-  const allGenes = useMemo(() => annotations.map(a => a.gene_name).sort(), [annotations]);
-
-  const partners = useMemo(() => {
-    const edges = pairs.filter(p => (p.ref === focal || p.target === focal));
-    const rows = edges.map(e => {
-      const partner = e.ref === focal ? e.target : e.ref;
-      const partAnn = geneIndex[partner];
-      const focalAnn = geneIndex[focal];
-      if (!partAnn || !focalAnn) return null;
-      const dist = Math.min(
-        Math.abs(partAnn.start - focalAnn.end),
-        Math.abs(partAnn.end - focalAnn.start),
-        Math.abs(partAnn.start - focalAnn.start),
-        Math.abs(partAnn.end - focalAnn.end)
-      );
-      const counts = e.counts ?? 0;
-      const weight = (e as any)[weightCol] ?? 0;
-      const type = e.ref === focal ? e.target_type : e.ref_type;
-      return {
-        partner,
-        x: partAnn.start,
-        y: Math.min(Number(weight) || 0, yCap),
-        rawY: Number(weight) || 0,
-        counts,
-        type: (type || partAnn.feature_type || "CDS") as FeatureType,
-        distance: dist,
-      };
-    }).filter(Boolean) as any[];
-
-    return rows
-      .filter(r => r.counts >= minCounts)
-      .filter(r => r.distance >= minDistance)
-      .filter(r => !excludeTypes.includes(r.type as FeatureType));
-  }, [pairs, focal, geneIndex, minCounts, minDistance, excludeTypes, weightCol, yCap]);
-
   const genomeMax = useMemo(() => Math.max(...annotations.map(a => a.end)), [annotations]);
   const focalAnn = geneIndex[focal];
-
-  const yTicks = useMemo(() => {
-    return [0, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter(v => v <= yCap);
-  }, [yCap]);
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!query) return;
-    const match = allGenes.find(g => g.toLowerCase() === query.toLowerCase()) ||
-      allGenes.find(g => g.toLowerCase().includes(query.toLowerCase()));
-    if (match) setFocal(match);
+    const match =
+      annotations.find(a => a.gene_name.toLowerCase() === query.toLowerCase()) ??
+      annotations.find(a => a.gene_name.toLowerCase().includes(query.toLowerCase()));
+    if (match) setFocal(match.gene_name);
   }
 
-  async function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const { data } = Papa.parse<Pair>(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
-    const rows = (data as any[]).filter(r => r.ref && r.target);
-    setData(prev => ({ ...prev, pairs: rows as Pair[] }));
-    setLoadedPairsName(file.name);
-  }
-  async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const { data } = Papa.parse<any>(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
-    const rows: Annotation[] = (data as any[])
-      .filter(r => r.gene_name && (r.start != null) && (r.end != null))
-      .map(r => ({
-        gene_name: String(r.gene_name),
-        start: Number(r.start),
-        end: Number(r.end),
-        feature_type: r.feature_type,
-        strand: r.strand,
-        chromosome: r.chromosome
-      }));
-    setData(prev => ({ ...prev, annotations: rows }));
-    setLoadedAnnoName(file.name);
-    if (rows.length > 0) setFocal(rows[0].gene_name);
-  }
+  const partners = useMemo(() => {
+    const edges = pairs.filter(p => p.ref === focal || p.target === focal);
+    const rows = edges
+      .map(e => {
+        const partner = e.ref === focal ? e.target : e.ref;
+        const partAnn = geneIndex[partner];
+        const fAnn = geneIndex[focal];
+        if (!partAnn || !fAnn) return null;
 
+        const dist = Math.min(
+          Math.abs(partAnn.start - fAnn.end),
+          Math.abs(partAnn.end - fAnn.start),
+          Math.abs(partAnn.start - fAnn.start),
+          Math.abs(partAnn.end - fAnn.end)
+        );
+
+        const counts = e.counts ?? 0;
+        const weight = Number(e.odds_ratio) || 0; // odds_ratio only
+        const type = e.ref === focal ? e.target_type : e.ref_type;
+
+        return {
+          partner,
+          x: partAnn.start,
+          y: Math.min(weight, yCap), // capped for plotting
+          rawY: weight, // actual odds ratio
+          counts,
+          type: (type || partAnn.feature_type || "CDS") as FeatureType,
+          distance: dist,
+        };
+      })
+      .filter(Boolean) as ScatterRow[];
+
+    return rows
+      .filter(r => r.counts >= minCounts)
+      .filter(r => r.distance >= minDistance)
+      .filter(r => !excludeTypes.includes(r.type));
+  }, [pairs, focal, geneIndex, minCounts, minDistance, excludeTypes, yCap]);
+
+  // table rows with filtering & sorting
+  const tableRows = useMemo(() => {
+    let rows = partners.filter(
+      r =>
+        r.rawY >= minOR &&
+        r.counts >= minCnt &&
+        r.x >= (coordMin || 0) &&
+        r.x <= (coordMax ?? genomeMax)
+    );
+    const cmp =
+      sortBy === "or"
+        ? (a: ScatterRow, b: ScatterRow) => a.rawY - b.rawY
+        : sortBy === "counts"
+        ? (a, b) => a.counts - b.counts
+        : (a, b) => a.x - b.x;
+    rows = rows.sort(cmp);
+    if (sortDir === "desc") rows.reverse();
+    return rows.slice(0, 100); // keep it snappy
+  }, [partners, minOR, minCnt, coordMin, coordMax, genomeMax, sortBy, sortDir]);
+
+  // export SVG with inline font styles (consistent fonts)
   function downloadSVG() {
     const node = document.getElementById("scatter-svg") as SVGSVGElement | null;
     if (!node) return;
+
+    // Inject style for consistent fonts/colors inside SVG
+    const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    style.textContent = `
+      text { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #1f2937; font-size: 10px; }
+      .axis-label { font-size: 11px; }
+    `;
+    const cloned = node.cloneNode(true) as SVGSVGElement;
+    cloned.insertBefore(style, cloned.firstChild);
+
     const serializer = new XMLSerializer();
-    const svgStr = serializer.serializeToString(node);
+    const svgStr = serializer.serializeToString(cloned);
     const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -205,12 +242,49 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
+  // CSV loaders
+  function parsePairsCSV(csv: string) {
+    const { data } = Papa.parse<Pair>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
+    return (data as any[]).filter(r => r.ref && r.target) as Pair[];
+  }
+  function parseAnnoCSV(csv: string) {
+    const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
+    const rows: Annotation[] = (data as any[])
+      .filter(r => r.gene_name && (r.start != null) && (r.end != null))
+      .map(r => ({
+        gene_name: String(r.gene_name),
+        start: Number(r.start),
+        end: Number(r.end),
+        feature_type: r.feature_type,
+        strand: r.strand,
+        chromosome: r.chromosome,
+      }));
+    return rows;
+  }
+  async function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setData(prev => ({ ...prev, pairs: parsePairsCSV(text) }));
+    setLoadedPairsName(file.name);
+  }
+  async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const parsed = parseAnnoCSV(text);
+    setData(prev => ({ ...prev, annotations: parsed }));
+    setLoadedAnnoName(file.name);
+    if (parsed.length > 0) setFocal(parsed[0].gene_name);
+  }
+
+  // UI
   return (
-    <div>
+    <div className="min-h-screen bg-white text-gray-900">
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-3">
           <div className="text-xl font-semibold">TRIC-seq Interactome Explorer</div>
-          <div className="text-xs text-gray-500">Demo uses simulated data — upload your CSVs below.</div>
+          <div className="text-xs text-gray-500">Upload your CSVs below to switch from simulated data.</div>
         </div>
       </header>
 
@@ -219,95 +293,154 @@ export default function Page() {
         <div className="col-span-12 lg:col-span-3 space-y-4">
           <section className="border rounded-2xl p-4 shadow-sm">
             <div className="font-semibold mb-2">Search</div>
-            <form onSubmit={handleSearchSubmit} className="flex gap-2 mb-2">
+            <form onSubmit={handleSearchSubmit} className="flex gap-2 mb-3">
               <input className="border rounded px-2 py-1 w-full" placeholder="Enter RNA (e.g., GcvB)" value={query} onChange={e => setQuery(e.target.value)} />
-              <button className="border rounded px-3">Go</button>
+              <button className="border rounded px-3" type="submit">Go</button>
             </form>
-            <select className="border rounded px-2 py-1 w-full" value={focal} onChange={e => setFocal(e.target.value)}>
-              {allGenes.map(g => <option key={g} value={g}>{g}</option>)}
-            </select>
-          </section>
 
-          <section className="border rounded-2xl p-4 shadow-sm space-y-3">
-            <div className="font-semibold">Filters</div>
+            <div className="text-xs text-gray-700 mb-1">Highlight genes (comma-separated)</div>
+            <textarea
+              className="border rounded w-full p-2 text-sm"
+              rows={3}
+              placeholder="e.g., oppA, argT, dppA"
+              value={highlightInput}
+              onChange={e => setHighlightInput(e.target.value)}
+            />
 
-            <label className="text-xs text-gray-600">Min counts: {minCounts}</label>
-            <input type="range" min={0} max={50} step={1} value={minCounts} onChange={e => setMinCounts(Number(e.target.value))} className="w-full" />
-
-            <label className="text-xs text-gray-600">Min distance (bp): {minDistance}</label>
-            <input type="range" min={0} max={20000} step={500} value={minDistance} onChange={e => setMinDistance(Number(e.target.value))} className="w-full" />
-
-            <label className="text-xs text-gray-600">Y cap (strength): {yCap}</label>
-            <input type="range" min={100} max={5000} step={100} value={yCap} onChange={e => setYCap(Number(e.target.value))} className="w-full" />
-
-            <label className="text-xs text-gray-600">Label threshold: {labelThreshold}</label>
-            <input type="range" min={0} max={500} step={5} value={labelThreshold} onChange={e => setLabelThreshold(Number(e.target.value))} className="w-full" />
-
-            <div className="text-xs text-gray-700 flex items-center gap-2">
-              <span>Weight:</span>
-              <select className="border rounded px-2 py-1" value={weightCol} onChange={e => setWeightCol(e.target.value as any)}>
-                <option value="odds_ratio">odds_ratio</option>
-                <option value="adjusted_score">adjusted_score</option>
-              </select>
-            </div>
-
-            <div className="text-xs text-gray-700">
-              Exclude types:
-              <div className="mt-1 flex flex-wrap gap-1">
-                {["rRNA","tRNA","hkRNA"].map(ft => {
-                  const active = excludeTypes.includes(ft as FeatureType);
-                  return (
-                    <button
-                      key={ft}
-                      type="button"
-                      className={`px-2 py-1 rounded border ${active ? "bg-gray-200" : "bg-white"}`}
-                      onClick={() => setExcludeTypes(prev => prev.includes(ft as FeatureType) ? prev.filter(x => x !== ft) : [...prev, ft as FeatureType])}
-                    >{ft}</button>
-                  );
-                })}
+            <div className="font-semibold mt-4">Filters</div>
+            <div className="mt-2 space-y-2">
+              <label className="text-xs text-gray-600 block">
+                Min counts: {minCounts}
+                <input type="range" min={0} max={50} step={1} value={minCounts} onChange={e => setMinCounts(Number(e.target.value))} className="w-full" />
+              </label>
+              <label className="text-xs text-gray-600 block">
+                Min distance (bp): {minDistance}
+                <input type="range" min={0} max={20000} step={500} value={minDistance} onChange={e => setMinDistance(Number(e.target.value))} className="w-full" />
+              </label>
+              <label className="text-xs text-gray-600 block">
+                Y cap (odds ratio): {yCap}
+                <input type="range" min={100} max={5000} step={100} value={yCap} onChange={e => setYCap(Number(e.target.value))} className="w-full" />
+              </label>
+              <label className="text-xs text-gray-600 block">
+                Label threshold (OR): {labelThreshold}
+                <input type="range" min={0} max={500} step={5} value={labelThreshold} onChange={e => setLabelThreshold(Number(e.target.value))} className="w-full" />
+              </label>
+              <div className="text-xs text-gray-700">
+                Exclude types:
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {["rRNA", "tRNA", "hkRNA"].map(ft => {
+                    const active = excludeTypes.includes(ft as FeatureType);
+                    return (
+                      <button
+                        key={ft}
+                        type="button"
+                        className={`px-2 py-1 rounded border ${active ? "bg-gray-200" : "bg-white"}`}
+                        onClick={() =>
+                          setExcludeTypes(prev =>
+                            prev.includes(ft as FeatureType) ? prev.filter(x => x !== ft) : [...prev, ft as FeatureType]
+                          )
+                        }
+                      >
+                        {ft}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </section>
 
-          <section className="border rounded-2xl p-4 shadow-sm space-y-2">
-            <div className="font-semibold">Data</div>
+            <div className="font-semibold mt-4">Data</div>
             <div className="flex gap-2 flex-wrap">
               <button className="border rounded px-3 py-1" onClick={() => setData(simulateData(500))}>Simulate</button>
               <button className="border rounded px-3 py-1" onClick={downloadSVG}>Export SVG</button>
             </div>
-            <div className="text-xs text-gray-600">Pairs table CSV</div>
+            <div className="text-xs text-gray-600 mt-2">Pairs table CSV</div>
             <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} />
             <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
-            <div className="text-xs text-gray-600 pt-2">Annotations CSV</div>
+            <div className="text-xs text-gray-600 mt-2">Annotations CSV</div>
             <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} />
             <div className="text-xs text-gray-500">{loadedAnnoName || "(using simulated annotations)"}</div>
-            <p className="text-[11px] text-gray-500 mt-2">
-              Expected headers — Pairs: ref,target,counts,odds_ratio,adjusted_score,… | Annotations: gene_name,start,end,feature_type,strand,chromosome
-            </p>
           </section>
         </div>
 
-        {/* Scatter + table */}
+        {/* Scatter + legend + table */}
         <div className="col-span-12 lg:col-span-9 space-y-4">
           <section className="border rounded-2xl p-4 shadow-sm">
             <ScatterPlot
               focal={focal}
-              focalAnn={geneIndex[focal]}
+              focalAnn={focalAnn}
               partners={partners}
               genomeMax={genomeMax}
               yCap={yCap}
-              yTicks={yTicks}
+              yTicks={[0, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter(v => v <= yCap)}
               labelThreshold={labelThreshold}
               onClickPartner={(name) => setFocal(name)}
+              highlightSet={highlightSet}
             />
+
+            {/* Legend OUTSIDE the SVG, below it */}
+            <div className="mt-3 flex flex-wrap gap-4 items-center">
+              <span className="text-sm font-medium">Feature types</span>
+              {[
+                "CDS",
+                "5'UTR",
+                "3'UTR",
+                "ncRNA",
+                "sRNA",
+                "tRNA",
+                "rRNA",
+                "sponge",
+                "hkRNA",
+              ].map(k => (
+                <span key={k} className="inline-flex items-center gap-2 text-xs">
+                  <span
+                    className="inline-block w-3 h-3 rounded-full border"
+                    style={{ background: "#fff", borderColor: pickColor(k), boxShadow: "inset 0 0 0 2px " + pickColor(k) }}
+                  />
+                  {k}
+                </span>
+              ))}
+              <span className="ml-6 text-xs text-gray-500">Fill = highlight; Size = counts</span>
+            </div>
           </section>
 
+          {/* Partners table with filters & sorting */}
           <section className="border rounded-2xl p-4 shadow-sm">
-            <div className="flex justify-between items-center mb-3">
-              <div className="font-semibold">Top partners for <span className="text-blue-600">{focal}</span></div>
-              <div className="text-xs text-gray-500">sorted by {weightCol}</div>
+            <div className="flex flex-wrap gap-3 items-end">
+              <div>
+                <div className="text-xs text-gray-600">Min odds ratio</div>
+                <input className="border rounded px-2 py-1 w-28" type="number" step="1" value={minOR} onChange={e => setMinOR(Number(e.target.value))}/>
+              </div>
+              <div>
+                <div className="text-xs text-gray-600">Min counts</div>
+                <input className="border rounded px-2 py-1 w-28" type="number" step="1" value={minCnt} onChange={e => setMinCnt(Number(e.target.value))}/>
+              </div>
+              <div>
+                <div className="text-xs text-gray-600">Start coord ≥</div>
+                <input className="border rounded px-2 py-1 w-36" type="number" step="1000" value={coordMin} onChange={e => setCoordMin(Number(e.target.value))}/>
+              </div>
+              <div>
+                <div className="text-xs text-gray-600">Start coord ≤</div>
+                <input className="border rounded px-2 py-1 w-36" type="number" step="1000" value={coordMax ?? genomeMax} onChange={e => setCoordMax(Number(e.target.value) || genomeMax)}/>
+              </div>
+              <div>
+                <div className="text-xs text-gray-600">Sort by</div>
+                <select className="border rounded px-2 py-1" value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
+                  <option value="or">odds_ratio</option>
+                  <option value="counts">counts</option>
+                  <option value="pos">position</option>
+                </select>
+              </div>
+              <div>
+                <div className="text-xs text-gray-600">Order</div>
+                <select className="border rounded px-2 py-1" value={sortDir} onChange={e => setSortDir(e.target.value as any)}>
+                  <option value="desc">desc</option>
+                  <option value="asc">asc</option>
+                </select>
+              </div>
             </div>
-            <div className="overflow-auto">
+
+            <div className="overflow-auto mt-3">
               <table className="min-w-full text-sm">
                 <thead className="text-left text-gray-600">
                   <tr>
@@ -315,12 +448,12 @@ export default function Page() {
                     <th className="py-1 pr-4">Feature</th>
                     <th className="py-1 pr-4">Start</th>
                     <th className="py-1 pr-4">Counts</th>
-                    <th className="py-1 pr-4">Strength</th>
+                    <th className="py-1 pr-4">Odds ratio</th>
                     <th className="py-1 pr-4">Distance</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...partners].sort((a,b) => b.rawY - a.rawY).slice(0,10).map(row => (
+                  {tableRows.map(row => (
                     <tr key={row.partner} className="hover:bg-gray-50 cursor-pointer" onClick={() => setFocal(row.partner)}>
                       <td className="py-1 pr-4 text-blue-700">{row.partner}</td>
                       <td className="py-1 pr-4">
@@ -333,6 +466,9 @@ export default function Page() {
                       <td className="py-1 pr-4">{row.distance}</td>
                     </tr>
                   ))}
+                  {tableRows.length === 0 && (
+                    <tr><td colSpan={6} className="py-2 text-gray-500">No rows match filters.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -346,14 +482,24 @@ export default function Page() {
 type ScatterRow = {
   partner: string;
   x: number;
-  y: number;
-  rawY: number;
+  y: number;     // capped for plotting
+  rawY: number;  // odds_ratio
   counts: number;
   type: FeatureType;
   distance: number;
 };
 
-function ScatterPlot({ focal, focalAnn, partners, genomeMax, yCap, yTicks, labelThreshold, onClickPartner } : {
+function ScatterPlot({
+  focal,
+  focalAnn,
+  partners,
+  genomeMax,
+  yCap,
+  yTicks,
+  labelThreshold,
+  onClickPartner,
+  highlightSet,
+}: {
   focal: string;
   focalAnn?: Annotation;
   partners: ScatterRow[];
@@ -362,6 +508,7 @@ function ScatterPlot({ focal, focalAnn, partners, genomeMax, yCap, yTicks, label
   yTicks: number[];
   labelThreshold: number;
   onClickPartner: (gene: string) => void;
+  highlightSet: Set<string>;
 }) {
   const width = 900;
   const height = 520;
@@ -377,6 +524,7 @@ function ScatterPlot({ focal, focalAnn, partners, genomeMax, yCap, yTicks, label
   };
   const sizeScale = (c: number) => Math.sqrt(c) * 2 + 4;
 
+  // de-crowd labels
   const sorted = [...partners].sort((a, b) => b.rawY - a.rawY);
   const placed: { x: number; y: number }[] = [];
   const labels = sorted
@@ -393,61 +541,70 @@ function ScatterPlot({ focal, focalAnn, partners, genomeMax, yCap, yTicks, label
   return (
     <div className="w-full overflow-x-auto">
       <svg id="scatter-svg" width={width} height={height} className="mx-auto block">
+        <defs>
+          <style>{`
+            text { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #1f2937; font-size: 10px; }
+            .axis-label { font-size: 11px; }
+          `}</style>
+        </defs>
+
         <g transform={`translate(${margin.left},${margin.top})`}>
+          {/* X axis */}
           <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
           {Array.from({ length: 6 }).map((_, i) => {
             const x = (i / 5) * genomeMax;
             return (
               <g key={i} transform={`translate(${xScale(x)},${innerH})`}>
                 <line y2={6} stroke="#222" />
-                <text y={20} textAnchor="middle" className="fill-gray-700 text-[10px]">{Math.round(x / 1e6)} Mb</text>
+                <text y={20} textAnchor="middle">{Math.round(x / 1e6)} Mb</text>
               </g>
             );
           })}
+
+          {/* Y axis */}
           <line x1={0} y1={0} x2={0} y2={innerH} stroke="#222" />
           {yTicks.map((t, i) => (
             <g key={i} transform={`translate(0,${yScale(t)})`}>
               <line x2={-6} stroke="#222" />
-              <text x={-9} y={3} textAnchor="end" className="fill-gray-700 text-[10px]">{t}</text>
+              <text x={-9} y={3} textAnchor="end">{t}</text>
               <line x1={0} x2={innerW} y1={0} y2={0} stroke="#eee" />
             </g>
           ))}
-          <text transform={`translate(${-44},${innerH/2}) rotate(-90)`} className="fill-gray-700 text-[11px]">Interaction strength</text>
+          <text transform={`translate(${-44},${innerH/2}) rotate(-90)`} className="axis-label">Interaction strength (odds ratio)</text>
 
+          {/* focal marker */}
           {focalAnn && (
             <g>
               <line x1={xScale(focalAnn.start)} y1={0} x2={xScale(focalAnn.start)} y2={innerH} stroke="#444" strokeDasharray="3 3" />
               <polygon points={`${xScale(focalAnn.start)-6},${innerH+10} ${xScale(focalAnn.start)+6},${innerH+10} ${xScale(focalAnn.start)},${innerH+2}`} fill="#000" />
-              <text x={xScale(focalAnn.start)} y={-2} textAnchor="middle" className="text-[11px] fill-gray-800">{focal}</text>
+              <text x={xScale(focalAnn.start)} y={-2} textAnchor="middle">{focal}</text>
             </g>
           )}
 
-          {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => (
-            <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
-              <circle r={sizeScale(p.counts)} fill="#fff" stroke={pickColor(p.type)} strokeWidth={2}
-                className="cursor-pointer hover:opacity-80" onClick={() => onClickPartner(p.partner)} />
-              <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.1} />
-            </g>
-          ))}
+          {/* points */}
+          {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => {
+            const highlight = highlightSet.has(p.partner);
+            return (
+              <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
+                <circle
+                  r={sizeScale(p.counts)}
+                  fill={highlight ? "#FFD54F" : "#fff"}
+                  stroke={pickColor(p.type)}
+                  strokeWidth={2}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => onClickPartner(p.partner)}
+                />
+                <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.1} />
+              </g>
+            );
+          })}
 
+          {/* labels */}
           {labels.map((p, i) => (
             <g key={i} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
-              <text x={6} y={-6} className="text-[10px] fill-gray-800 rotate-12">{p.partner}</text>
+              <text x={6} y={-6}>{p.partner}</text>
             </g>
           ))}
-        </g>
-
-        <g transform={`translate(${width-170},${20})`}>
-          <text className="text-[11px] fill-gray-800">Feature type</text>
-          {Object.entries(FEATURE_COLORS).slice(0,7).map(([k, color], i) => (
-            <g key={k} transform={`translate(0,${14 + i*14})`}>
-              <circle r={5} cx={6} cy={6} fill="#fff" stroke={color} strokeWidth={2} />
-              <text x={18} y={10} className="text-[10px] fill-gray-700">{k}</text>
-            </g>
-          ))}
-          <g transform={`translate(0,${14 + 7*14})`}>
-            <text className="text-[11px] fill-gray-800">Circle size = counts</text>
-          </g>
         </g>
       </svg>
     </div>

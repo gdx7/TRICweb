@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState, useRef } from "react";
 import Papa from "papaparse";
+import "../styles/globals.css";
 
 type FeatureType =
   | "CDS"
@@ -44,7 +45,7 @@ type ScatterRow = {
   distance: number;
 };
 
-const FEATURE_COLORS: Record<string, string> = {
+const FEATURE_COLORS: Record<FeatureType, string> = {
   // sRNA and ncRNA share magenta
   ncRNA: "#A40194",
   sRNA: "#A40194",
@@ -63,7 +64,6 @@ function simulateData(nGenes = 500) {
   const ann: Annotation[] = [];
   const classes: FeatureType[] = ["CDS", "5'UTR", "3'UTR", "ncRNA", "tRNA", "sRNA"];
   const genomeLen = 4_600_000;
-
   for (let i = 0; i < nGenes; i++) {
     const ft = classes[Math.floor(rng() * classes.length)];
     const start = Math.floor(rng() * genomeLen);
@@ -72,8 +72,8 @@ function simulateData(nGenes = 500) {
     const name = ft === "sRNA" ? `sRNA_${i}` : `gene_${i}`;
     ann.push({ gene_name: name, start, end, feature_type: ft, strand: rng() > 0.5 ? "+" : "-", chromosome: "chr" });
   }
-  ann.push({ gene_name: "GcvB", start: 3_500_000, end: 3_500_600, feature_type: "sRNA", strand: "+", chromosome: "chr" });
-  ann.push({ gene_name: "CpxQ", start: 1_800_000, end: 1_800_480, feature_type: "sRNA", strand: "+", chromosome: "chr" });
+  ann.push({ gene_name: "GcvB", start: 3500000, end: 3500600, feature_type: "sRNA", strand: "+", chromosome: "chr" });
+  ann.push({ gene_name: "CpxQ", start: 1800000, end: 1800480, feature_type: "sRNA", strand: "+", chromosome: "chr" });
 
   const pairs: Pair[] = [];
   const genes = ann.map(a => a.gene_name);
@@ -82,11 +82,18 @@ function simulateData(nGenes = 500) {
     const or = 0.5 + Math.pow(rng(), 0.4) * 400 * bias;
     const aAnn = ann.find(x => x.gene_name === a);
     const bAnn = ann.find(x => x.gene_name === b);
-    pairs.push({ ref: a, target: b, counts: c, odds_ratio: or, ref_type: aAnn?.feature_type, target_type: bAnn?.feature_type });
+    pairs.push({
+      ref: a,
+      target: b,
+      counts: c,
+      odds_ratio: or,
+      ref_type: aAnn?.feature_type,
+      target_type: bAnn?.feature_type,
+    });
   }
   for (let k = 0; k < nGenes * 2; k++) {
     const a = genes[Math.floor(rng() * genes.length)];
-    const b = genes[Math.floor(rng() * genes.length)];
+    let b = genes[Math.floor(rng() * genes.length)];
     if (a === b) continue;
     addEdge(a, b, 1);
   }
@@ -106,13 +113,13 @@ function symlog(y: number, linthresh = 10, base = 10) {
 export default function Page() {
   const [data, setData] = useState(() => simulateData(500));
   const [focal, setFocal] = useState<string>("GcvB");
-
   const [minCounts, setMinCounts] = useState(5);
   const [minDistance, setMinDistance] = useState(5000);
   const [yCap, setYCap] = useState(5000);
   const [labelThreshold, setLabelThreshold] = useState(50);
   const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["rRNA", "tRNA"]);
   const [query, setQuery] = useState("");
+  const [highlightQuery, setHighlightQuery] = useState(""); // genes to face-fill yellow
 
   const filePairsRef = useRef<HTMLInputElement>(null);
   const fileAnnoRef = useRef<HTMLInputElement>(null);
@@ -124,21 +131,29 @@ export default function Page() {
 
   const geneIndex = useMemo(() => {
     const idx: Record<string, Annotation> = {};
-    annotations.forEach(a => (idx[a.gene_name] = a));
+    annotations.forEach(a => (idx[a.gene_name.trim()] = a));
     return idx;
   }, [annotations]);
 
   const allGenes = useMemo(() => annotations.map(a => a.gene_name).sort(), [annotations]);
 
-  // Build partners strictly from the pairs where focal is ref or target.
-  // Deduplicate by partner: sum counts, take MAX odds_ratio, keep partner type.
+  const highlightSet = useMemo(() => {
+    // comma or whitespace separated
+    const toks = highlightQuery
+      .split(/[, \n\t\r]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+    return new Set(toks);
+  }, [highlightQuery]);
+
+  // STRICT aggregation: sum counts, max odds_ratio for each partner
   const partners = useMemo<ScatterRow[]>(() => {
-    const edges = pairs.filter(p => (p.ref?.trim() === focal || p.target?.trim() === focal));
+    const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
     const acc = new Map<string, ScatterRow>();
 
     for (const e of edges) {
-      const ref = (e.ref || "").trim();
-      const tgt = (e.target || "").trim();
+      const ref = String(e.ref || "").trim();
+      const tgt = String(e.target || "").trim();
       const partner = ref === focal ? tgt : ref;
       if (!partner || partner === focal) continue;
 
@@ -182,18 +197,14 @@ export default function Page() {
     return Array.from(acc.values())
       .filter(r => r.counts >= minCounts)
       .filter(r => r.distance >= minDistance)
-      .filter(r => !excludeTypes.includes(r.type));
+      .filter(r => !excludeTypes.includes(r.type))
+      .sort((a, b) => b.rawY - a.rawY);
   }, [pairs, focal, geneIndex, minCounts, minDistance, excludeTypes, yCap]);
 
   const genomeMax = useMemo(() => Math.max(...annotations.map(a => a.end)), [annotations]);
   const focalAnn = geneIndex[focal];
 
   const yTicks = useMemo(() => [0, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter(v => v <= yCap), [yCap]);
-
-  const topPartners = useMemo(
-    () => [...partners].sort((a, b) => b.rawY - a.rawY).slice(0, 10),
-    [partners]
-  );
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -204,16 +215,12 @@ export default function Page() {
     if (match) setFocal(match);
   }
 
-  // --- CSV loaders: trim names to avoid phantom entries ---
+  // CSV loaders (trim names)
   function parsePairsCSV(csv: string) {
     const { data } = Papa.parse<Pair>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows = (data as any[])
       .filter(r => r.ref && r.target)
-      .map(r => ({
-        ...r,
-        ref: String(r.ref).trim(),
-        target: String(r.target).trim(),
-      }));
+      .map(r => ({ ...r, ref: String(r.ref).trim(), target: String(r.target).trim() }));
     return rows as Pair[];
   }
   function parseAnnoCSV(csv: string) {
@@ -248,7 +255,7 @@ export default function Page() {
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
 
-  // SVG export with embedded styles so fonts match
+  // Export SVG with embedded fonts/styles
   function downloadSVG() {
     const el = document.getElementById("scatter-svg") as SVGSVGElement | null;
     if (!el) return;
@@ -275,7 +282,7 @@ export default function Page() {
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-3">
           <div className="text-xl font-semibold">TRIC-seq Interactome Explorer</div>
-          <div className="text-xs text-gray-500">Upload your CSVs below; demo uses simulated data.</div>
+          <div className="text-xs text-gray-500">Demo uses simulated data — upload your CSVs below.</div>
         </div>
       </header>
 
@@ -285,43 +292,95 @@ export default function Page() {
           <section className="border rounded-2xl p-4 shadow-sm">
             <div className="font-semibold mb-2">Search</div>
             <form onSubmit={handleSearchSubmit} className="flex gap-2 mb-2">
-              <input className="border rounded px-2 py-1 w-full" placeholder="Enter RNA (e.g., GcvB)" value={query} onChange={e => setQuery(e.target.value)} />
+              <input
+                className="border rounded px-2 py-1 w-full"
+                placeholder="Enter RNA (e.g., GcvB)"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+              />
               <button className="border rounded px-3">Go</button>
             </form>
-            <select className="border rounded px-2 py-1 w-full" value={focal} onChange={e => setFocal(e.target.value)}>
-              {allGenes.map(g => <option key={g} value={g}>{g}</option>)}
-            </select>
+
+            {/* Highlight list for yellow face color */}
+            <div className="mt-3">
+              <div className="text-xs text-gray-600 mb-1">Highlight genes (comma/space-separated)</div>
+              <input
+                className="border rounded px-2 py-1 w-full"
+                placeholder="e.g., dnaK, tufA, sRNA_12"
+                value={highlightQuery}
+                onChange={e => setHighlightQuery(e.target.value)}
+              />
+              <div className="text-[11px] text-gray-500 mt-1">Highlighted genes appear with yellow fill if present in the map.</div>
+            </div>
           </section>
 
           <section className="border rounded-2xl p-4 shadow-sm space-y-3">
             <div className="font-semibold">Filters</div>
 
             <label className="text-xs text-gray-600">Min counts: {minCounts}</label>
-            <input type="range" min={0} max={50} step={1} value={minCounts} onChange={e => setMinCounts(Number(e.target.value))} className="w-full" />
+            <input
+              type="range"
+              min={0}
+              max={50}
+              step={1}
+              value={minCounts}
+              onChange={e => setMinCounts(Number(e.target.value))}
+              className="w-full"
+            />
 
             <label className="text-xs text-gray-600">Min distance (bp): {minDistance}</label>
-            <input type="range" min={0} max={20000} step={500} value={minDistance} onChange={e => setMinDistance(Number(e.target.value))} className="w-full" />
+            <input
+              type="range"
+              min={0}
+              max={20000}
+              step={500}
+              value={minDistance}
+              onChange={e => setMinDistance(Number(e.target.value))}
+              className="w-full"
+            />
 
             <label className="text-xs text-gray-600">Y cap (odds ratio): {yCap}</label>
-            <input type="range" min={100} max={5000} step={100} value={yCap} onChange={e => setYCap(Number(e.target.value))} className="w-full" />
+            <input
+              type="range"
+              min={100}
+              max={5000}
+              step={100}
+              value={yCap}
+              onChange={e => setYCap(Number(e.target.value))}
+              className="w-full"
+            />
 
             <label className="text-xs text-gray-600">Label threshold: {labelThreshold}</label>
-            <input type="range" min={0} max={500} step={5} value={labelThreshold} onChange={e => setLabelThreshold(Number(e.target.value))} className="w-full" />
+            <input
+              type="range"
+              min={0}
+              max={500}
+              step={5}
+              value={labelThreshold}
+              onChange={e => setLabelThreshold(Number(e.target.value))}
+              className="w-full"
+            />
 
             <div className="text-xs text-gray-700">
               Exclude types:
               <div className="mt-1 flex flex-wrap gap-1">
-                {["rRNA","tRNA","hkRNA"].map(ft => {
+                {["rRNA", "tRNA", "hkRNA"].map(ft => {
                   const active = excludeTypes.includes(ft as FeatureType);
                   return (
                     <button
                       key={ft}
                       type="button"
                       className={`px-2 py-1 rounded border ${active ? "bg-gray-200" : "bg-white"}`}
-                      onClick={() => setExcludeTypes(prev =>
-                        prev.includes(ft as FeatureType) ? prev.filter(x => x !== ft) : [...prev, ft as FeatureType]
-                      )}
-                    >{ft}</button>
+                      onClick={() =>
+                        setExcludeTypes(prev =>
+                          prev.includes(ft as FeatureType)
+                            ? prev.filter(x => x !== ft)
+                            : [...prev, ft as FeatureType]
+                        )
+                      }
+                    >
+                      {ft}
+                    </button>
                   );
                 })}
               </div>
@@ -331,25 +390,26 @@ export default function Page() {
           <section className="border rounded-2xl p-4 shadow-sm space-y-2">
             <div className="font-semibold">Data</div>
             <div className="flex gap-2 flex-wrap">
-              <button className="border rounded px-3 py-1" onClick={() => setData(simulateData(500))}>Simulate</button>
-              <button className="border rounded px-3 py-1" onClick={downloadSVG}>Export SVG</button>
+              <button className="border rounded px-3 py-1" onClick={() => setData(simulateData(500))}>
+                Simulate
+              </button>
+              <button className="border rounded px-3 py-1" onClick={downloadSVG}>
+                Export SVG
+              </button>
             </div>
-
             <div className="text-xs text-gray-600">Pairs table CSV</div>
             <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} />
             <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
-
             <div className="text-xs text-gray-600 pt-2">Annotations CSV</div>
             <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} />
             <div className="text-xs text-gray-500">{loadedAnnoName || "(using simulated annotations)"}</div>
-
             <p className="text-[11px] text-gray-500 mt-2">
               Headers — Pairs: ref,target,counts,odds_ratio,… | Annotations: gene_name,start,end,feature_type,strand,chromosome
             </p>
           </section>
         </div>
 
-        {/* Plot + legend + table */}
+        {/* Scatter + legend + full partner table */}
         <div className="col-span-12 lg:col-span-9 space-y-4">
           <section className="border rounded-2xl p-4 shadow-sm">
             <ScatterPlot
@@ -360,16 +420,18 @@ export default function Page() {
               yCap={yCap}
               yTicks={yTicks}
               labelThreshold={labelThreshold}
+              highlightSet={highlightSet}
               onClickPartner={(name) => setFocal(name)}
             />
-            {/* Legend BELOW the plot */}
+
+            {/* Legend below the plot (no obstruction) */}
             <div className="mt-3 flex flex-wrap gap-4 items-center">
               <span className="text-sm font-medium">Feature types</span>
               {["CDS","5'UTR","3'UTR","ncRNA","sRNA","tRNA","rRNA","sponge","hkRNA"].map(k => (
                 <span key={k} className="inline-flex items-center gap-2 text-xs">
                   <span
                     className="inline-block w-3 h-3 rounded-full border"
-                    style={{ background: "#fff", borderColor: pickColor(k), boxShadow: `inset 0 0 0 2px ${pickColor(k)}` }}
+                    style={{ background: "#fff", borderColor: pickColor(k as FeatureType), boxShadow: `inset 0 0 0 2px ${pickColor(k as FeatureType)}` }}
                   />
                   {k}
                 </span>
@@ -380,12 +442,15 @@ export default function Page() {
 
           <section className="border rounded-2xl p-4 shadow-sm">
             <div className="flex justify-between items-center mb-3">
-              <div className="font-semibold">Top partners for <span className="text-blue-600">{focal}</span></div>
+              <div className="font-semibold">
+                Partners for <span className="text-blue-600">{focal}</span>{" "}
+                <span className="text-xs text-gray-500">({partners.length} shown)</span>
+              </div>
               <div className="text-xs text-gray-500">sorted by odds_ratio</div>
             </div>
-            <div className="overflow-auto">
+            <div className="overflow-auto max-h-[500px]">
               <table className="min-w-full text-sm">
-                <thead className="text-left text-gray-600">
+                <thead className="sticky top-0 bg-white text-left text-gray-600">
                   <tr>
                     <th className="py-1 pr-4">Partner</th>
                     <th className="py-1 pr-4">Feature</th>
@@ -396,11 +461,18 @@ export default function Page() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...topPartners].map(row => (
-                    <tr key={row.partner} className="hover:bg-gray-50 cursor-pointer" onClick={() => setFocal(row.partner)}>
+                  {partners.map(row => (
+                    <tr
+                      key={row.partner}
+                      className="hover:bg-gray-50 cursor-pointer"
+                      onClick={() => setFocal(row.partner)}
+                    >
                       <td className="py-1 pr-4 text-blue-700">{row.partner}</td>
                       <td className="py-1 pr-4">
-                        <span className="inline-block w-3 h-3 rounded-full mr-1" style={{ background: pickColor(row.type), border: "1px solid #333" }} />
+                        <span
+                          className="inline-block w-3 h-3 rounded-full mr-1"
+                          style={{ background: pickColor(row.type), border: "1px solid #333" }}
+                        />
                         {row.type}
                       </td>
                       <td className="py-1 pr-4">{row.x}</td>
@@ -409,8 +481,12 @@ export default function Page() {
                       <td className="py-1 pr-4">{row.distance}</td>
                     </tr>
                   ))}
-                  {topPartners.length === 0 && (
-                    <tr><td colSpan={6} className="py-2 text-gray-500">No partners after filters.</td></tr>
+                  {partners.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="py-2 text-gray-500">
+                        No partners after filters.
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
@@ -430,6 +506,7 @@ function ScatterPlot({
   yCap,
   yTicks,
   labelThreshold,
+  highlightSet,
   onClickPartner,
 }: {
   focal: string;
@@ -439,6 +516,7 @@ function ScatterPlot({
   yCap: number;
   yTicks: number[];
   labelThreshold: number;
+  highlightSet: Set<string>;
   onClickPartner: (gene: string) => void;
 }) {
   const width = 900;
@@ -509,19 +587,23 @@ function ScatterPlot({
           )}
 
           {/* points */}
-          {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => (
-            <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
-              <circle
-                r={sizeScale(p.counts)}
-                fill="#fff"
-                stroke={pickColor(p.type)}
-                strokeWidth={2}
-                style={{ cursor: "pointer" }}
-                onClick={() => onClickPartner(p.partner)}
-              />
-              <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.12} />
-            </g>
-          ))}
+          {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => {
+            const highlighted = highlightSet.has(p.partner);
+            const face = highlighted ? "#FFEB3B" : "#FFFFFF"; // yellow vs white
+            return (
+              <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
+                <circle
+                  r={sizeScale(p.counts)}
+                  fill={face}
+                  stroke={pickColor(p.type)}
+                  strokeWidth={2}
+                  className="cursor-pointer hover:opacity-80"
+                  onClick={() => onClickPartner(p.partner)}
+                />
+                <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.12} />
+              </g>
+            );
+          })}
 
           {/* labels */}
           {labels.map((p, i) => (

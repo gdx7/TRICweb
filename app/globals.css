@@ -6,3 +6,13 @@
 /* Small polish */
 :root { color-scheme: light; }
 html, body { height: 100%; }
+
+/* Gentle drifting animation for homepage bubbles */
+@keyframes drift {
+  0%   { transform: translate(0, 0) rotate(0deg); }
+  25%  { transform: translate(var(--dx, 18px), var(--dy, -12px)) rotate(2deg); }
+  50%  { transform: translate(0, 0) rotate(0deg); }
+  75%  { transform: translate(calc(var(--dx, -18px) * -1), calc(var(--dy, 12px) * -1)) rotate(-2deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+

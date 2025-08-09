@@ -2,7 +2,6 @@
 
 import React, { useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
-import "../styles/globals.css";
 
 type FeatureType =
   | "CDS"

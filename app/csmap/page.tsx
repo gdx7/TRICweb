@@ -1,306 +1,370 @@
-// app/csmap/page.tsx
 "use client";
+
 import React, { useMemo, useRef, useState } from "react";
-import { Annotation, Pair, FEATURE_COLORS, pickColor, parseAnnoCSV, parsePairsCSV, geneIndex, distanceBetween } from "@/lib/shared";
+import {
+  Annotation,
+  Pair,
+  FEATURE_COLORS,
+  pickColor,
+  parseAnnoCSV,
+  parsePairsCSV,
+  geneIndex as buildIndex,
+  distanceBetween,
+} from "@/lib/shared";
 
-type PeakRow = {
-  gene: string;        // input gene (column)
-  partner: string;     // target partner
-  odds: number;        // odds_ratio (capped)
-  rawOdds: number;     // original odds_ratio
-  counts: number;      // counts
-  xCol: number;        // gene column index (0..N-1)
-  color: string;       // stroke color by target feature
-};
-
-function mixColor(hex: string, t: number) {
-  const to = (s: string) => parseInt(s, 16);
-  const r = (to(hex.slice(1,3)) * t + 255 * (1-t))|0;
-  const g = (to(hex.slice(3,5)) * t + 255 * (1-t))|0;
-  const b = (to(hex.slice(5,7)) * t + 255 * (1-t))|0;
-  return `rgb(${r},${g},${b})`;
+/** --- small helpers --- */
+function symlog(y: number, linthresh = 10, base = Math.E) {
+  const s = Math.sign(y);
+  const a = Math.abs(y);
+  return a <= linthresh ? s * (a / linthresh) : s * (1 + Math.log(a / linthresh) / Math.log(base));
+}
+function invSymlog(t: number, linthresh = 10, base = Math.E) {
+  const s = Math.sign(t);
+  const a = Math.abs(t);
+  return a <= 1 ? s * a * linthresh : s * linthresh * Math.pow(base, (a - 1));
+}
+function jitter(seed: number) {
+  // cheap deterministic pseudo-rng in [−0.08, +0.08]
+  const x = Math.sin(seed * 9999) * 43758.5453;
+  return (x - Math.floor(x)) * 0.16 - 0.08;
 }
 
+/** local peak picking: pick max-odds item per 1kb window along genome */
+function pickLocalPeaks(
+  rows: { x: number; odds: number }[],
+  windowBp = 1000
+) {
+  if (rows.length === 0) return [] as number[];
+  const sorted = rows.map((r, i) => ({ ...r, i })).sort((a, b) => a.x - b.x);
+  const peaks: number[] = [];
+  let cur = sorted[0];
+  for (let k = 1; k < sorted.length; k++) {
+    const r = sorted[k];
+    if (r.x > cur.x + windowBp) {
+      peaks.push(cur.i);
+      cur = r;
+    } else if (r.odds > cur.odds) {
+      cur = r;
+    }
+  }
+  peaks.push(cur.i);
+  return peaks;
+}
+
+type Item = {
+  gene: string;      // input gene (column)
+  partner: string;   // partner gene
+  x: number;         // partner start coord
+  odds: number;      // odds ratio (or adjusted_score)
+  counts: number;    // counts
+  type?: string;     // partner feature_type
+  dist: number;      // inter-gene distance
+};
+
 export default function CsMapPage() {
-  const [pairs, setPairs] = useState<Pair[] | null>(null);
-  const [anno, setAnno] = useState<Annotation[] | null>(null);
-  const [geneList, setGeneList] = useState<string>("");
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [pairs, setPairs] = useState<Pair[]>([]);
+  const [genesText, setGenesText] = useState("GcvB,CpxQ");
   const [minCounts, setMinCounts] = useState(5);
   const [minDistance, setMinDistance] = useState(5000);
   const [yCap, setYCap] = useState(5000);
-  const [spacing, setSpacing] = useState(1000); // minimal spacing between local peaks
-  const [barUsesTotals, setBarUsesTotals] = useState(true);
+  const [peakWindow, setPeakWindow] = useState(1000); // 1 kb
+  const [excludeHK, setExcludeHK] = useState(true);
 
   const filePairsRef = useRef<HTMLInputElement>(null);
   const fileAnnoRef = useRef<HTMLInputElement>(null);
-  const genomeLen = useMemo(() => Math.max(...(anno || []).map(a => a.end), 1), [anno]);
 
-  const idx = useMemo(() => (anno ? geneIndex(anno) : {}), [anno]);
+  const idx = useMemo(() => buildIndex(annotations), [annotations]);
+  const genomeMax = useMemo(
+    () => (annotations.length ? Math.max(...annotations.map(a => a.end)) : 4_700_000),
+    [annotations]
+  );
 
   async function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0]; if (!f) return;
-    setPairs(parsePairsCSV(await f.text()));
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setPairs(parsePairsCSV(text));
   }
   async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0]; if (!f) return;
-    setAnno(parseAnnoCSV(await f.text()));
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setAnnotations(parseAnnoCSV(text));
   }
 
-  const genes = useMemo(() =>
-    geneList.split(",").map(s => s.trim()).filter(Boolean), [geneList]);
+  const geneList = useMemo(
+    () => genesText.split(",").map(s => s.trim()).filter(Boolean),
+    [genesText]
+  );
 
-  const peaks: PeakRow[] = useMemo(() => {
-    if (!pairs || !anno || genes.length === 0) return [];
-    const out: PeakRow[] = [];
-    const gi = geneIndex(anno);
+  const totalsByGene = useMemo(() => {
+    // sum of counts for each input gene
+    const t: Record<string, number> = {};
+    geneList.forEach(g => (t[g] = 0));
+    for (const e of pairs) {
+      if (t[e.ref] !== undefined) t[e.ref] += e.counts ?? 0;
+      if (t[e.target] !== undefined) t[e.target] += e.counts ?? 0;
+    }
+    return t;
+  }, [pairs, geneList]);
 
-    genes.forEach((gname, col) => {
-      const focal = gi[gname]; if (!focal) return;
+  const allItems = useMemo(() => {
+    const items: Item[] = [];
 
-      // edges where ref==gene (to match your Colab logic)
-      const edges = pairs.filter(p => p.ref === gname);
-      // filter counts/odds/distance
-      const items = edges.map(e => {
-        const targ = gi[e.target!]; if (!targ) return null;
-        const dist = distanceBetween(focal, targ);
-        const counts = Number(e.counts || 0);
-        const odds = Number(e.odds_ratio || 0);
-        return { e, targ, counts, odds, x: targ.start };
-      }).filter(r => r && r.counts >= minCounts && r.odds > 0 && r.dist >= minDistance) as any[];
+    for (const g of geneList) {
+      const gAnn = idx[g];
+      if (!gAnn) continue;
 
-      // sort by genome position
-      items.sort((a,b) => a.x - b.x);
+      // edges involving g
+      const edges = pairs.filter(e => e.ref === g || e.target === g);
 
-      // greedy keep local maxima separated by spacing
-      let current = items[0] || null;
-      const keep: any[] = [];
-      for (let i=1; i<items.length; i++) {
-        const it = items[i];
-        if (!current) { current = it; continue; }
-        if (it.x > current.x + spacing) {
-          keep.push(current);
-          current = it;
-        } else if (it.odds > current.odds) {
-          current = it;
-        }
-      }
-      if (current) keep.push(current);
+      const raw: Item[] = edges.map(e => {
+        const partner = e.ref === g ? e.target : e.ref;
+        const pAnn = idx[partner];
+        if (!pAnn) return null;
 
-      keep.forEach(k => {
-        out.push({
-          gene: gname,
-          partner: k.e.target,
-          odds: Math.min(k.odds, yCap),
-          rawOdds: k.odds,
-          counts: k.counts,
-          xCol: col,
-          color: pickColor(k.e.target_type),
-        });
-      });
-    });
+        const counts = e.counts ?? 0;
+        const odds = Number(e.odds_ratio ?? e.adjusted_score ?? 0);
+        const type = e.ref === g ? e.target_type : e.ref_type;
+        const dist = distanceBetween(gAnn, pAnn);
+        return { gene: g, partner, x: pAnn.start, odds, counts, type, dist };
+      }).filter(Boolean) as Item[];
 
-    // draw larger circles under small ones
-    out.sort((a,b) => b.counts - a.counts);
-    return out;
-  }, [pairs, anno, genes, minCounts, minDistance, yCap, spacing]);
+      // filters
+      let filtered = raw
+        .filter(r => r.counts >= minCounts)
+        .filter(r => r.odds > 0)
+        .filter(r => r.dist >= minDistance);
+      if (excludeHK) filtered = filtered.filter(r => r.type !== "hkRNA");
 
-  // totals bar: reference logic (prefer totals/total_ref)
-  const totals = useMemo(() => {
-    if (!pairs || genes.length === 0) return new Map<string, number>();
-    const m = new Map<string, number>();
-    genes.forEach(g => {
-      const refRow = pairs.find(p => p.ref === g && p.total_ref != null);
-      const tarRow = pairs.find(p => p.target === g && p.totals != null);
-      let val = barUsesTotals
-        ? (refRow?.total_ref ?? tarRow?.totals)
-        : undefined;
-      if (val == null) {
-        // fallback: sum of counts involving that gene
-        val = pairs.reduce((acc, p) => acc + ((p.ref===g || p.target===g) ? Number(p.counts||0) : 0), 0);
-      }
-      m.set(g, Number(val) || 0);
-    });
-    return m;
-  }, [pairs, genes, barUsesTotals]);
+      // local peaks per genome for this gene
+      const peaksIdx = pickLocalPeaks(filtered.map(r => ({ x: r.x, odds: r.odds })), peakWindow);
+      const kept = peaksIdx.map(i => filtered[i]);
+      items.push(...kept);
+    }
 
-  // rendering
-  const width = Math.max(400, genes.length * 140 + 120);
-  const height = 460;
-  const margin = { top: 30, right: 150, bottom: 60, left: 50 };
-  const innerW = width - margin.left - margin.right;
-  const innerH = height - margin.top - margin.bottom;
+    return items;
+  }, [geneList, idx, pairs, minCounts, minDistance, excludeHK, peakWindow]);
 
-  const yTicks = [0,5,10,25,50,100,250,500,1000,2500,5000].filter(v => v<=yCap);
-
-  function exportSVG(id: string, fname: string) {
-    const node = document.getElementById(id) as SVGSVGElement | null;
+  function downloadSVG() {
+    const node = document.getElementById("csmap-svg") as SVGSVGElement | null;
     if (!node) return;
-    const svg = node.cloneNode(true) as SVGSVGElement;
-    const style = document.createElementNS("http://www.w3.org/2000/svg","style");
-    style.textContent = `text, tspan { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; font-size: 12px; }`;
-    svg.insertBefore(style, svg.firstChild);
-    const s = new XMLSerializer().serializeToString(svg);
-    const blob = new Blob([s], { type: "image/svg+xml;charset=utf-8" });
+    const serializer = new XMLSerializer();
+    const svgStr = serializer.serializeToString(node);
+    const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    const a = Object.assign(document.createElement("a"), { href: url, download: fname });
-    a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `csMAP.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
-    <div className="min-h-screen bg-white text-gray-900">
-      <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-white/60 bg-white/90 border-b">
-        <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-3">
-          <div className="text-xl font-semibold">csMAP</div>
-          <a href="/" className="text-sm text-blue-600 hover:underline">Home</a>
+    <div className="mx-auto max-w-7xl p-4 space-y-4">
+      <header className="flex flex-col sm:flex-row gap-3 sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">csMAP — Collapsed multi-gene interaction map</h1>
+          <p className="text-xs text-gray-600">
+            Upload the same Pairs and Annotations CSV as the global map. Enter a comma-separated gene list. Points are local peaks (1 kb) of partner odds-ratio; size=counts; color=feature type.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button className="border rounded px-3 py-1" onClick={downloadSVG}>Export SVG</button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl p-4 space-y-4">
-        <section className="border rounded-2xl p-4 shadow-sm">
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <div className="font-semibold mb-1">Gene list</div>
-              <input className="border rounded px-2 py-1 w-full" placeholder="gcvB,sroC,..." value={geneList} onChange={e => setGeneList(e.target.value)} />
-              <div className="grid grid-cols-2 gap-3 mt-3 text-sm">
-                <div>
-                  <label className="text-xs text-gray-600">Min counts: {minCounts}</label>
-                  <input type="range" min={0} max={50} value={minCounts} onChange={e => setMinCounts(+e.target.value)} className="w-full" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-600">Min distance (bp): {minDistance}</label>
-                  <input type="range" min={0} max={20000} step={500} value={minDistance} onChange={e => setMinDistance(+e.target.value)} className="w-full" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-600">Y cap (odds): {yCap}</label>
-                  <input type="range" min={100} max={5000} step={100} value={yCap} onChange={e => setYCap(+e.target.value)} className="w-full" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-600">Peak spacing (nt): {spacing}</label>
-                  <input type="range" min={200} max={3000} step={100} value={spacing} onChange={e => setSpacing(+e.target.value)} className="w-full" />
-                </div>
-              </div>
-              <div className="mt-3 text-xs">
-                Totals bar uses:
-                <label className="ml-2"><input type="radio" checked={barUsesTotals} onChange={() => setBarUsesTotals(true)} /> dataset totals</label>
-                <label className="ml-2"><input type="radio" checked={!barUsesTotals} onChange={() => setBarUsesTotals(false)} /> sum of counts</label>
-              </div>
-            </div>
-
-            <div>
-              <div className="font-semibold">Data</div>
-              <div className="text-xs text-gray-600 mt-2">Pairs CSV</div>
-              <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} />
-              <div className="text-xs text-gray-600 mt-2">Annotations CSV</div>
-              <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} />
-              <p className="text-[11px] text-gray-500 mt-2">Pairs: ref,target,counts,odds_ratio,... | Annotations: gene_name,start,end,feature_type,strand,chromosome</p>
-              <div className="mt-3 flex gap-2">
-                <button className="border rounded px-3 py-1" onClick={() => exportSVG("csmap-svg", "csmap.svg")}>Export csMAP SVG</button>
-                <button className="border rounded px-3 py-1" onClick={() => exportSVG("bar-svg", "csmap_totals.svg")}>Export totals SVG</button>
-              </div>
-            </div>
+      {/* Controls */}
+      <div className="grid grid-cols-12 gap-4">
+        <section className="col-span-12 lg:col-span-3 border rounded-2xl p-4 space-y-3">
+          <div>
+            <div className="text-sm font-medium mb-1">Pairs CSV</div>
+            <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} />
+          </div>
+          <div>
+            <div className="text-sm font-medium mb-1">Annotations CSV</div>
+            <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} />
+          </div>
+          <div>
+            <div className="text-sm font-medium mb-1">Gene list (comma-separated)</div>
+            <textarea
+              className="w-full border rounded p-2 text-sm"
+              rows={3}
+              value={genesText}
+              onChange={e => setGenesText(e.target.value)}
+              placeholder="e.g. GcvB,CpxQ,MicF"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-gray-600">Min counts: {minCounts}</label>
+            <input type="range" min={0} max={100} step={1} value={minCounts} onChange={e => setMinCounts(+e.target.value)} className="w-full" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-600">Min distance (bp): {minDistance}</label>
+            <input type="range" min={0} max={20000} step={500} value={minDistance} onChange={e => setMinDistance(+e.target.value)} className="w-full" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-600">Y cap (odds ratio): {yCap}</label>
+            <input type="range" min={100} max={5000} step={100} value={yCap} onChange={e => setYCap(+e.target.value)} className="w-full" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-600">Peak window (bp): {peakWindow}</label>
+            <input type="range" min={200} max={5000} step={100} value={peakWindow} onChange={e => setPeakWindow(+e.target.value)} className="w-full" />
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <input id="exHK" type="checkbox" checked={excludeHK} onChange={e => setExcludeHK(e.target.checked)} />
+            <label htmlFor="exHK">Exclude hkRNA</label>
           </div>
         </section>
 
-        {/* csMAP scatter */}
-        <section className="border rounded-2xl p-4 shadow-sm overflow-x-auto">
-          <svg id="csmap-svg" width={width} height={height}>
-            <g transform={`translate(50,20)`}>
-              {/* axes */}
-              <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
-              {/* x ticks: gene columns */}
-              {genes.map((g, i) => (
-                <g key={g} transform={`translate(${(i+0.5)* (innerW/Math.max(1,genes.length))},${innerH})`}>
-                  <line y2={6} stroke="#222" />
-                  <text y={26} textAnchor="middle" fontSize={12}>{g}</text>
-                </g>
-              ))}
-              {/* y axis */}
-              <line x1={0} y1={0} x2={0} y2={innerH} stroke="#222" />
-              {yTicks.map((t, i) => {
-                const tMax = Math.log(yCap/10)/Math.log(10) + 1; // approx symlog screen; use display mapping below
-                const y = innerH - (symlog(t,10,10) / symlog(yCap,10,10)) * innerH;
-                return (
-                  <g key={i} transform={`translate(0,${y})`}>
-                    <line x2={-6} stroke="#222" />
-                    <text x={-9} y={4} textAnchor="end" fontSize={11}>{t}</text>
-                    <line x1={0} x2={innerW} y1={0} y2={0} stroke="#eee" />
-                  </g>
-                );
-              })}
-              <text transform={`translate(${-42},${innerH/2}) rotate(-90)`} fontSize={12} fill="#333">Odds ratio (symlog)</text>
+        {/* Plots */}
+        <section className="col-span-12 lg:col-span-9 space-y-6">
+          <CollapsedScatter
+            items={allItems}
+            genes={geneList}
+            yCap={yCap}
+          />
+          <TotalsBar totals={geneList.map(g => ({ gene: g, total: totalsByGene[g] ?? 0 }))} />
+        </section>
+      </div>
+    </div>
+  );
+}
 
-              {/* points */}
-              {peaks.map((p, i) => {
-                const colW = innerW/Math.max(1, genes.length);
-                const x = p.xCol * colW + colW/2 + (Math.random()-0.5)*colW*0.08;
-                const y = innerH - (symlog(p.odds,10,10) / symlog(yCap,10,10)) * innerH;
-                const r = Math.sqrt(p.counts) * 2 + 4;
-                return (
-                  <g key={i} transform={`translate(${x},${y})`}>
-                    <circle r={r} fill="#fff" stroke={p.color} strokeWidth={2} />
-                  </g>
-                );
-              })}
-            </g>
+/** -------- Collapsed Scatter (one column per input gene) -------- */
+function CollapsedScatter({ items, genes, yCap }:{
+  items: Item[];
+  genes: string[];
+  yCap: number;
+}) {
+  const width = Math.max(900, genes.length * 120);
+  const height = 520;
+  const margin = { top: 16, right: 170, bottom: 64, left: 60 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
 
-            {/* legend on right */}
-            <g transform={`translate(${width-140},20)`}>
-              <text fontSize={12}>Feature type</text>
-              {Object.entries(FEATURE_COLORS).map(([k, color], i) => (
-                <g key={k} transform={`translate(0,${14 + i*14})`}>
-                  <circle r={5} cx={6} cy={6} fill="#fff" stroke={color} strokeWidth={2} />
-                  <text x={18} y={10} fontSize={11}>{k}</text>
-                </g>
-              ))}
-              <g transform={`translate(0,${14 + (Object.keys(FEATURE_COLORS).length)*14})`}>
-                <text fontSize={12}>Circle size = counts</text>
+  const yTicks = [0, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter(v => v <= yCap);
+
+  const sizeScale = (c: number) => Math.sqrt(Math.max(1, c)) * 2 + 4;
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg id="csmap-svg" width={width} height={height} className="mx-auto block">
+        <g transform={`translate(${margin.left},${margin.top})`}>
+          {/* axes */}
+          <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
+          {genes.map((g, i) => {
+            const gx = (i + 0.5) * (innerW / genes.length);
+            return (
+              <g key={g} transform={`translate(${gx},${innerH})`}>
+                <line y2={6} stroke="#222" />
+                <text y={22} textAnchor="middle" className="fill-gray-700 text-[11px] rotate-45">{g}</text>
               </g>
-            </g>
-          </svg>
-        </section>
+            );
+          })}
+          <line x1={0} y1={0} x2={0} y2={innerH} stroke="#222" />
+          {yTicks.map((t, i) => {
+            const ty = innerH - (symlog(t,10,10) / symlog(yCap,10,10)) * innerH;
+            return (
+              <g key={i} transform={`translate(0,${ty})`}>
+                <line x2={-6} stroke="#222" />
+                <text x={-9} y={3} textAnchor="end" className="fill-gray-700 text-[10px]">{t}</text>
+                <line x1={0} x2={innerW} y1={0} y2={0} stroke="#eee" />
+              </g>
+            );
+          })}
+          <text transform={`translate(${-44},${innerH/2}) rotate(-90)`} className="fill-gray-700 text-[11px]">Odds ratio (symlog)</text>
 
-        {/* Totals bar */}
-        <section className="border rounded-2xl p-4 shadow-sm overflow-x-auto">
-          <svg id="bar-svg" width={width} height={360}>
-            <g transform={`translate(60,20)`}>
-              {(() => {
-                const vals = genes.map(g => totals.get(g) || 0);
-                const maxV = Math.max(1, ...vals);
-                const h = 280, w = innerW;
-                const barW = w/Math.max(1,genes.length) * 0.7;
-                return (
-                  <>
-                    {/* y log ticks at powers of 10 */}
-                    <line x1={0} y1={h} x2={w} y2={h} stroke="#222"/>
-                    {[1,10,100,1000,10000,100000,1000000].filter(v=>v<=Math.max(maxV,10)).map((v,i)=> {
-                      const y = h - (Math.log10(v)/Math.log10(maxV)) * h;
-                      return (
-                        <g key={v} transform={`translate(0,${y})`}>
-                          <line x2={-6} stroke="#222"/>
-                          <text x={-9} y={4} textAnchor="end" fontSize={11}>{v}</text>
-                          <line x1={0} x2={w} y1={0} y2={0} stroke="#eee"/>
-                        </g>
-                      );
-                    })}
-                    {genes.map((g,i)=>{
-                      const v = Math.max(1, totals.get(g) || 0);
-                      const y = h - (Math.log10(v)/Math.log10(maxV))*h;
-                      const x = (i+0.5)*(w/Math.max(1,genes.length)) - barW/2;
-                      return (
-                        <g key={g}>
-                          <rect x={x} y={y} width={barW} height={h-y} fill={mixColor("#3b82f6",0.25)} stroke="#1f2937"/>
-                          <text x={x+barW/2} y={h+18} textAnchor="middle" fontSize={12} transform={`rotate(0,${x+barW/2},${h+18})`}>{g}</text>
-                        </g>
-                      );
-                    })}
-                    <text transform={`translate(${-46},${h/2}) rotate(-90)`} fontSize={12}>Total interactions (log)</text>
-                  </>
-                );
-              })()}
+          {/* dots */}
+          {items.map((it, k) => {
+            const col = genes.indexOf(it.gene);
+            if (col < 0) return null;
+            const cx = ((col + 0.5) * (innerW / genes.length)) + jitter(k) * (innerW / genes.length);
+            const cy = innerH - (symlog(Math.min(it.odds, yCap),10,10) / symlog(yCap,10,10)) * innerH;
+            const stroke = pickColor(it.type as any);
+            return (
+              <g key={`${it.gene}:${it.partner}:${k}`} transform={`translate(${cx},${cy})`}>
+                <circle r={sizeScale(it.counts)} fill="#fff" stroke={stroke} strokeWidth={2} />
+              </g>
+            );
+          })}
+        </g>
+
+        {/* Legend */}
+        <g transform={`translate(${width-160},${20})`}>
+          <text className="text-[11px] fill-gray-800">Feature type</text>
+          {Object.entries(FEATURE_COLORS).map(([k, color], i) => (
+            <g key={k} transform={`translate(0,${14 + i*14})`}>
+              <circle r={5} cx={6} cy={6} fill="#fff" stroke={color} strokeWidth={2} />
+              <text x={18} y={10} className="text-[10px] fill-gray-700">{k}</text>
             </g>
-          </svg>
-        </section>
-      </main>
+          ))}
+          <g transform={`translate(0,${14 + 9*14})`}>
+            <text className="text-[11px] fill-gray-800">Circle size = counts</text>
+          </g>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+/** -------- Totals log bar -------- */
+function TotalsBar({ totals }:{ totals: { gene: string; total: number }[] }) {
+  if (!totals.length) return null;
+
+  const maxTotal = Math.max(...totals.map(t => Math.max(1, t.total)));
+  const width = Math.max(900, totals.length * 120);
+  const height = 380;
+  const margin = { top: 12, right: 20, bottom: 64, left: 80 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+
+  const yTicks = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000].filter(v => v <= maxTotal);
+
+  function yPos(v: number) {
+    const t = Math.log10(v);
+    const tMax = Math.log10(maxTotal);
+    return innerH - (t / tMax) * innerH;
+  }
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg width={width} height={height} className="mx-auto block">
+        <g transform={`translate(${margin.left},${margin.top})`}>
+          {/* axes */}
+          <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
+          {totals.map((t, i) => {
+            const x = (i + 0.5) * (innerW / totals.length);
+            return (
+              <g key={t.gene} transform={`translate(${x},${innerH})`}>
+                <text y={22} textAnchor="middle" className="fill-gray-700 text-[11px] rotate-45">{t.gene}</text>
+              </g>
+            );
+          })}
+          <line x1={0} y1={0} x2={0} y2={innerH} stroke="#222" />
+          {yTicks.map((v, i) => (
+            <g key={i} transform={`translate(0,${yPos(v)})`}>
+              <line x2={-6} stroke="#222" />
+              <text x={-9} y={3} textAnchor="end" className="fill-gray-700 text-[10px]">{v}</text>
+              <line x1={0} x2={innerW} y1={0} y2={0} stroke="#eee" />
+            </g>
+          ))}
+          <text transform={`translate(${-56},${innerH/2}) rotate(-90)`} className="fill-gray-700 text-[11px]">Total interactions (log₁₀)</text>
+
+          {/* bars */}
+          {totals.map((t, i) => {
+            const x = (i + 0.5) * (innerW / totals.length);
+            const y0 = yPos(1);
+            const y1 = yPos(Math.max(1, t.total));
+            const barH = Math.max(2, y0 - y1);
+            const barW = Math.max(10, (innerW / totals.length) * 0.6);
+            return (
+              <rect key={t.gene} x={x - barW/2} y={y1} width={barW} height={barH} fill="#87CEEB" stroke="#222" />
+            );
+          })}
+        </g>
+      </svg>
     </div>
   );
 }

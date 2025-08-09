@@ -1,4 +1,4 @@
-// lib/shared.ts  (or src/lib/shared.ts)
+// lib/shared.ts
 import Papa from "papaparse";
 
 export type FeatureType =
@@ -41,6 +41,7 @@ export const FEATURE_COLORS: Record<FeatureType, string> = {
 export const pickColor = (ft?: FeatureType) =>
   FEATURE_COLORS[ft || "CDS"] || "#F78208";
 
+// symlog + inverse (for plotting)
 export function symlog(y: number, linthresh = 10, base = Math.E) {
   const s = Math.sign(y);
   const a = Math.abs(y);
@@ -52,6 +53,7 @@ export function invSymlog(t: number, linthresh = 10, base = Math.E) {
   return a <= 1 ? s * a * linthresh : s * linthresh * Math.pow(base, (a - 1));
 }
 
+// CSV parsers
 export function parsePairsCSV(csv: string) {
   const { data } = Papa.parse<Pair>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
   return (data as any[]).filter(r => r.ref && r.target) as Pair[];

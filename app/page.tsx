@@ -1,135 +1,164 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
 import Link from "next/link";
+import React, { useMemo } from "react";
 
-const STROKES = [
-  "#A40194", // ncRNA/sRNA
-  "#F12C2C", // sponge
-  "#82F778", // tRNA
-  "#F78208", // CDS
-  "#76AAD7", // 5'UTR
-  "#0C0C0C", // 3'UTR
-  "#999999", // rRNA
-  "#C4C5C5", // hkRNA
-];
+export default function HomePage() {
+  // Colors match your feature palette (stroke only, no fill)
+  const ringColors = [
+    "#F78208", // CDS
+    "#76AAD7", // 5'UTR
+    "#0C0C0C", // 3'UTR
+    "#A40194", // ncRNA/sRNA magenta
+    "#82F778", // tRNA
+    "#999999", // rRNA (grey)
+    "#F12C2C", // sponge
+  ];
 
-type Bubble = {
-  x: number;
-  y: number;
-  r: number;
-  vx: number;
-  vy: number;
-  color: string;
-};
-
-export default function Home() {
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const bubblesRef = useRef<Bubble[]>([]);
-
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    const W = svg.clientWidth || 1200;
-    const H = svg.clientHeight || 700;
-
-    // init bubbles
-    const N = 36;
-    const B: Bubble[] = [];
-    for (let i = 0; i < N; i++) {
-      B.push({
-        x: Math.random() * W,
-        y: Math.random() * H,
-        r: 16 + Math.random() * 80,
-        vx: (Math.random() - 0.5) * 0.25,
-        vy: (Math.random() - 0.5) * 0.25,
-        color: STROKES[i % STROKES.length],
-      });
+  // Gentle drifting rings
+  const rings = useMemo(() => {
+    const RINGS = 18;
+    const out: Array<{
+      size: number;
+      top: string;
+      left: string;
+      color: string;
+      dur1: string;
+      dur2: string;
+      blur: number;
+      opacity: number;
+    }> = [];
+    for (let i = 0; i < RINGS; i++) {
+      const size = Math.floor(70 + Math.random() * 170);
+      const top = `${Math.floor(Math.random() * 80)}%`;
+      const left = `${Math.floor(Math.random() * 80)}%`;
+      const color = ringColors[i % ringColors.length];
+      const dur1 = `${8 + Math.random() * 10}s`;
+      const dur2 = `${10 + Math.random() * 12}s`;
+      const blur = Math.random() < 0.5 ? 2 : 4;
+      const opacity = 0.22 + Math.random() * 0.18;
+      out.push({ size, top, left, color, dur1, dur2, blur, opacity });
     }
-    bubblesRef.current = B;
-
-    const nodes = B.map((b, i) => {
-      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-      g.setAttribute("opacity", "0.6");
-      const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      c.setAttribute("cx", String(b.x));
-      c.setAttribute("cy", String(b.y));
-      c.setAttribute("r", String(b.r));
-      c.setAttribute("fill", "none");
-      c.setAttribute("stroke", b.color);
-      c.setAttribute("stroke-width", "2.5");
-      c.setAttribute("filter", "url(#soft)");
-      g.appendChild(c);
-      svg.appendChild(g);
-      return c;
-    });
-
-    let raf = 0;
-    const tick = () => {
-      const W = svg.clientWidth || 1200;
-      const H = svg.clientHeight || 700;
-      B.forEach((b, i) => {
-        b.x += b.vx;
-        b.y += b.vy;
-        if (b.x < -100) b.x = W + 100;
-        if (b.x > W + 100) b.x = -100;
-        if (b.y < -100) b.y = H + 100;
-        if (b.y > H + 100) b.y = -100;
-        nodes[i].setAttribute("cx", String(b.x));
-        nodes[i].setAttribute("cy", String(b.y));
-      });
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return out;
   }, []);
 
   return (
-    <main className="relative min-h-[86vh] overflow-hidden bg-white">
-      {/* animated background */}
-      <svg ref={svgRef} className="absolute inset-0 w-full h-full" aria-hidden>
-        <defs>
-          <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="1.2" />
-          </filter>
-        </defs>
-      </svg>
+    <main className="relative min-h-[100svh] overflow-hidden bg-white text-gray-900">
+      {/* Floating rings */}
+      <div className="absolute inset-0 pointer-events-none">
+        {rings.map((r, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full"
+            style={{
+              top: r.top,
+              left: r.left,
+              width: r.size,
+              height: r.size,
+              border: `3px solid ${r.color}`,
+              filter: `blur(${r.blur}px)`,
+              opacity: r.opacity,
+              animation: `driftX ${r.dur1} ease-in-out infinite alternate, driftY ${r.dur2} ease-in-out infinite alternate`,
+            }}
+          />
+        ))}
+      </div>
 
-      {/* content */}
-      <div className="relative z-10 mx-auto max-w-5xl px-6 pt-20 pb-16 text-center">
-        <h1 className="text-4xl md:text-5xl font-semibold tracking-tight text-gray-900">
-          TRIC-seq Interactome Explorer
-        </h1>
-        <p className="mt-4 text-gray-600 max-w-2xl mx-auto">
-          Explore global RNA–RNA contacts, collapse maps for custom gene sets, and inter-RNA heatmaps.
-          Upload your CSV/BED files and click your way through the interactome.
-        </p>
-
-        <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-          <Link
-            href="/global"
-            className="inline-flex items-center justify-center rounded-xl border px-6 py-3 text-base font-medium shadow-sm hover:shadow transition bg-white/80 backdrop-blur"
-          >
-            globalMAP
-          </Link>
-          <Link
-            href="/csmap"
-            className="inline-flex items-center justify-center rounded-xl border px-6 py-3 text-base font-medium shadow-sm hover:shadow transition bg-white/80 backdrop-blur"
-          >
-            csMAP
-          </Link>
-          <Link
-            href="/pairmap"
-            className="inline-flex items-center justify-center rounded-xl border px-6 py-3 text-base font-medium shadow-sm hover:shadow transition bg-white/80 backdrop-blur"
-          >
-            pairMAP
-          </Link>
+      {/* Hero content */}
+      <div className="relative z-10 mx-auto max-w-5xl px-6 pt-20 pb-10">
+        <div className="text-center">
+          <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight">
+            TRIC-seq Interactome Explorer
+          </h1>
+          <p className="mt-3 text-base sm:text-lg text-gray-600">
+            Explore global RNA–RNA interaction maps, generate collapsed csMAPs, and
+            build pairwise inter-RNA heatmaps—in your browser.
+          </p>
         </div>
 
-        <div className="mt-10 text-xs text-gray-500">
-          Colors match feature types (magenta: sRNA/ncRNA, orange: CDS, blue: 5′UTR, black: 3′UTR, green: tRNA, grey: rRNA/hkRNA).
+        {/* Buttons */}
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+          <CTA href="/global" label="GlobalMAP" color="#76AAD7" />
+          <CTA href="/csmap" label="csMAP" color="#A40194" />
+          <CTA href="/pairmap" label="pairMAP" color="#F78208" />
+        </div>
+
+        {/* Quick tips */}
+        <div className="mt-10 grid sm:grid-cols-3 gap-4 text-sm text-gray-600">
+          <Tip>
+            <b>GlobalMAP:</b> search an RNA, click partners to re-center, export SVG.
+          </Tip>
+          <Tip>
+            <b>csMAP:</b> paste a comma/space gene list and upload your CSVs to
+            compare peaks across RNAs.
+          </Tip>
+          <Tip>
+            <b>pairMAP:</b> enter a pair and upload your .bed chimeras to see a
+            2D heatmap.
+          </Tip>
         </div>
       </div>
+
+      {/* Footer with lab logo */}
+      <footer className="relative z-10 mx-auto max-w-5xl px-6 pb-10">
+        <div className="mt-12 pt-6 border-t flex items-center justify-center gap-3">
+          <a
+            href="https://www.drna.nl"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group inline-flex items-center gap-3"
+          >
+            {/* Put your logo file at /public/drna-logo.png */}
+            <img
+              src="/drna-logo.png"
+              alt="dRNA Lab"
+              width={44}
+              height={44}
+              className="opacity-80 group-hover:opacity-100 transition-opacity"
+            />
+            <span className="text-xs text-gray-600">
+              a <span className="font-medium text-gray-800">dRNA Lab</span> production
+            </span>
+          </a>
+        </div>
+      </footer>
+
+      {/* Page styles (animations) */}
+      <style jsx global>{`
+        @keyframes driftX {
+          0% { transform: translateX(0px); }
+          100% { transform: translateX(30px); }
+        }
+        @keyframes driftY {
+          0% { transform: translateY(0px); }
+          100% { transform: translateY(-24px); }
+        }
+      `}</style>
     </main>
+  );
+}
+
+function CTA({ href, label, color }: { href: string; label: string; color: string }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center justify-center rounded-full px-7 py-3 text-base font-medium bg-white/70 hover:bg-white
+                 ring-2 transition focus:outline-none focus-visible:ring-4"
+      style={{
+        color: "#111827",
+        borderColor: color,
+        boxShadow: `0 0 0 2px ${color} inset`,
+      }}
+    >
+      {label}
+    </Link>
+  );
+}
+
+function Tip({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border bg-white/70 p-3">
+      {children}
+    </div>
   );
 }

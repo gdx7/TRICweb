@@ -267,35 +267,92 @@ export default function CsMapPage() {
         </svg>
       </div>
 
-      {/* Totals bar chart (narrower bars) */}
-      <div className="overflow-x-auto mt-8">
-        <svg width={W} height={260} style={{ display: "block" }}>
-          <defs>
-            <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style>
-          </defs>
-          <g transform={`translate(${margin.left},20)`}>
-            {/* axis line */}
-            <line x1={0} y1={200} x2={innerW} y2={200} stroke="#222" />
-            {totals.map((t, i) => {
-              const cx = ((i + 0.5) / geneList.length) * innerW;
-              const h = 200 - barY(t.total);
-              return (
-                <g key={i} transform={`translate(${cx},0)`}>
-                  <rect x={-barW/2} y={barY(t.total)} width={barW} height={h} fill="#8ecae6" stroke="#1f2937" />
-                  <text y={220} textAnchor="middle">{t.gene}</text>
-                </g>
-              );
-            })}
-            <text x={-6} y={-6} textAnchor="end">Total interactions (log-like scale)</text>
-          </g>
-        </svg>
-      </div>
+{/* Totals bar chart */}
+<div className="relative overflow-x-auto rounded-lg border bg-white mt-6">
+  <button
+    onClick={() => exportSVG("csmap-bars", "csMAP_totals")}
+    className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
+  >
+    Export SVG
+  </button>
 
-      {warnings.length > 0 && (
-        <div className="mt-4 text-xs text-amber-700">
-          {warnings.map((w, i) => <div key={i}>• {w}</div>)}
-        </div>
-      )}
-    </div>
-  );
-}
+  {(() => {
+    // --- layout for bar chart ---
+    const W = Math.max(540, 160 * Math.max(1, geneList.length));
+    const BAR_H = 320;
+    const bMargin = { top: 28, right: 50, bottom: 70, left: 72 };
+    const bInnerW = W - bMargin.left - bMargin.right;
+    const bInnerH = BAR_H - bMargin.top - bMargin.bottom;
+
+    // --- log10 scale helpers ---
+    const tMax = Math.max(1, ...totals.map((t) => t.total || 1));
+    const maxPow = Math.pow(10, Math.ceil(Math.log10(tMax)));
+    const yTicks: number[] = [];
+    for (let p = 0; p <= Math.ceil(Math.log10(maxPow)); p++) yTicks.push(Math.pow(10, p));
+    const barY = (v: number) =>
+      bInnerH - (Math.log10(Math.max(1, v)) / Math.log10(maxPow)) * bInnerH;
+
+    // --- x positions + slim bars ---
+    const step = bInnerW / Math.max(1, geneList.length);
+    const barW = Math.min(24, Math.max(10, step * 0.35));
+
+    return (
+      <svg id="csmap-bars" width={W} height={BAR_H} style={{ display: "block" }}>
+        <defs>
+          <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style>
+        </defs>
+        <g transform={`translate(${bMargin.left},${bMargin.top})`}>
+          {/* axes */}
+          <line x1={0} y1={bInnerH} x2={bInnerW} y2={bInnerH} stroke="#222" />
+          {/* y ticks (powers of 10) */}
+          {yTicks.map((v, i) => (
+            <g key={i} transform={`translate(0,${barY(v)})`}>
+              <line x2={-6} stroke="#222" />
+              <text x={-9} y={3} textAnchor="end">
+                {v.toLocaleString()}
+              </text>
+              <line x1={0} x2={bInnerW} y1={0} y2={0} stroke="#eef2f7" />
+            </g>
+          ))}
+          <text transform={`translate(${-54},${bInnerH / 2}) rotate(-90)`}>
+            Total interactions (log10)
+          </text>
+
+          {/* bars */}
+          {totals.map((t, i) => {
+            const x = i * step + (step - barW) / 2;
+            const y = barY(t.total || 0);
+            const h = bInnerH - y;
+            return (
+              <g key={i} transform={`translate(${x},${y})`}>
+                <rect width={barW} height={Math.max(0, h)} fill="#93c5fd" stroke="#60a5fa" />
+                {/* value label (small) */}
+                <text
+                  x={barW / 2}
+                  y={-6}
+                  textAnchor="middle"
+                  style={{ fontSize: "10px", fill: "#334155" }}
+                >
+                  {t.total || 0}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* x labels */}
+          {totals.map((t, i) => {
+            const x = i * step + step / 2;
+            return (
+              <g key={i} transform={`translate(${x},${bInnerH})`}>
+                <text y={20} textAnchor="middle" transform="rotate(-30)">
+                  {t.gene.toLowerCase()}
+                </text>
+              </g>
+            );
+          })}
+        </g>
+      </svg>
+    );
+  })()}
+</div>
+

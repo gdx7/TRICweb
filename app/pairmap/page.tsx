@@ -1,323 +1,286 @@
 "use client";
 
 import React, { useMemo, useRef, useState } from "react";
-import {
-  Annotation,
-  parseAnnoCSV,
-  geneIndex as buildIndex,
-} from "@/lib/shared";
+import Papa from "papaparse";
 
-/**
- * PairMAP (inter-RNA heatmap)
- * Inputs:
- *  - Annotations CSV (gene_name,start,end,feature_type,strand,chromosome)
- *  - BED/TSV/CSV of chimeras with at least 2 numeric columns = coordinates (C1, C2)
- *  - Primary RNA (Y-axis), comma-separated list of X RNAs
- * Controls:
- *  - FLANK_Y, FLANK_X, BIN (nt), VMAX color scale
- * Rendering:
- *  - One panel per X; counts binned into (Ybins × Xbins)
- *  - Reverse-strand flipping to 5′→3′ for both axes
- *  - Y inverted (0 at bottom) by drawing from bottom upward
- */
+// ---------- Types ----------
+type FeatureType =
+  | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | string;
 
-type Chimera = { c1: number; c2: number };
+type Annotation = {
+  gene_name: string;
+  start: number;
+  end: number;
+  feature_type?: FeatureType;
+  strand?: string;
+  chromosome?: string;
+};
 
-function parseChimeras(text: string): Chimera[] {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const out: Chimera[] = [];
-  for (const line of lines) {
-    // accept TSV/BED/CSV-ish; seek two numeric columns anywhere
-    const parts = line.split(/[,\t\s]+/).filter(Boolean);
-    if (parts.length < 2) continue;
-    // try last two numeric columns
-    const nums = parts.map(p => Number(p)).filter(n => Number.isFinite(n));
-    if (nums.length >= 2) {
-      const c1 = nums[0];
-      const c2 = nums[1];
-      out.push({ c1, c2 });
-    }
-  }
-  return out;
+// ---------- Utils ----------
+const cf = (s: string) => String(s || "").trim().toLowerCase();
+const FEATURE_COLORS: Record<FeatureType, string> = {
+  ncRNA: "#A40194", sRNA: "#A40194", sponge: "#F12C2C", tRNA: "#82F778",
+  hkRNA: "#C4C5C5", CDS: "#F78208", "5'UTR": "#76AAD7", "3'UTR": "#0C0C0C", rRNA: "#999999",
+};
+
+// parse annotations (expects headers)
+function parseAnnoCSV(csv: string): Annotation[] {
+  const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
+  return (data as any[])
+    .filter((r) => r.gene_name && (r.start != null) && (r.end != null))
+    .map((r) => ({
+      gene_name: String(r.gene_name).trim(),
+      start: Number(r.start),
+      end: Number(r.end),
+      feature_type: r.feature_type,
+      strand: r.strand,
+      chromosome: r.chromosome,
+    }));
 }
 
-// strand-aware bin index
-function toBin(coord: number, ws: number, we: number, strand: string, bin: number) {
-  return strand === "+" ? Math.floor((coord - ws) / bin) : Math.floor((we - coord) / bin);
+// parse .bed/.csv with two numeric coordinate columns (C1, C2)
+async function parseContacts(file: File): Promise<Array<[number, number]>> {
+  const txt = await file.text();
+  const lines = txt.split(/\r?\n/).filter(Boolean);
+  const rows: Array<[number, number]> = [];
+  for (const line of lines) {
+    // try bed-like: chrom  pos1  pos2
+    const parts = line.split(/\s+|,/).filter(Boolean);
+    if (parts.length >= 3 && !isNaN(Number(parts[1])) && !isNaN(Number(parts[2]))) {
+      rows.push([Number(parts[1]), Number(parts[2])]);
+    } else if (parts.length >= 2 && !isNaN(Number(parts[0])) && !isNaN(Number(parts[1]))) {
+      rows.push([Number(parts[0]), Number(parts[1])]);
+    }
+  }
+  return rows;
+}
+
+function exportSVG(id: string, name: string) {
+  const el = document.getElementById(id) as SVGSVGElement | null;
+  if (!el) return;
+  const clone = el.cloneNode(true) as SVGSVGElement;
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+  style.textContent =
+    'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}';
+  defs.appendChild(style);
+  clone.insertBefore(defs, clone.firstChild);
+  const ser = new XMLSerializer();
+  const str = ser.serializeToString(clone);
+  const blob = new Blob([str], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name.endsWith(".svg") ? name : `${name}.svg`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function PairMapPage() {
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const [chimeras, setChimeras] = useState<Chimera[]>([]);
-  const [primary, setPrimary] = useState("GcvB"); // y-axis
-  const [xListText, setXListText] = useState("CpxQ,MicF");
-  const [FLANK_Y, setFLANK_Y] = useState(100);
-  const [FLANK_X, setFLANK_X] = useState(100);
-  const [BIN, setBIN] = useState(10);
-  const [VMAX, setVMAX] = useState(10);
+  const [anno, setAnno] = useState<Annotation[]>([]);
+  const [contacts, setContacts] = useState<Array<[number, number]>>([]);
 
-  const fileAnnoRef = useRef<HTMLInputElement>(null);
-  const fileBedRef = useRef<HTMLInputElement>(null);
+  const [primaryRNA, setPrimaryRNA] = useState("gcvB");                // Y-axis (case-insensitive)
+  const [secondary, setSecondary] = useState("cpxQ,sroC,arrS");        // X-axis list
 
-  const idx = useMemo(() => buildIndex(annotations), [annotations]);
-  const xGenes = useMemo(() => xListText.split(",").map(s => s.trim()).filter(Boolean), [xListText]);
+  const annoByCF = useMemo(() => {
+    const m = new Map<string, Annotation>();
+    for (const a of anno) m.set(cf(a.gene_name), a);  // <- lowercase index
+    return m;
+  }, [anno]);
 
   async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    const txt = await f.text();
-    setAnnotations(parseAnnoCSV(txt));
+    const text = await f.text();
+    setAnno(parseAnnoCSV(text));
   }
-  async function onBedFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onContactsFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    const txt = await f.text();
-    setChimeras(parseChimeras(txt));
+    setContacts(await parseContacts(f));
   }
 
-  // precompute Y window / bins
-  const yMeta = useMemo(() => {
-    const ya = idx[primary];
-    if (!ya) return null;
-    const ws = Math.max(1, ya.start - FLANK_Y);
-    const we = ya.end + FLANK_Y;
-    const bins = Math.ceil((we - ws + 1) / BIN);
-    const yLenBins = Math.floor((ya.end - ya.start) / BIN);
-    const yStartBin = Math.floor(FLANK_Y / BIN);
-    const yEndBin = yStartBin + Math.max(0, yLenBins - 1);
-    return { ws, we, strand: ya.strand || "+", bins, yStartBin, yEndBin };
-  }, [idx, primary, FLANK_Y, BIN]);
+  // params
+  const FLANK_Y = 100, FLANK_X = 100, BIN = 10, VMAX = 10;
 
-  // build one matrix per X RNA
-  const panels = useMemo(() => {
-    if (!yMeta) return [];
-    const out: {
-      gene: string;
-      binsX: number;
-      mat: number[][]; // [Y][X]
-      xStartBin: number;
-      xEndBin: number;
-    }[] = [];
+  const yGeneCF = cf(primaryRNA);
+  const xGenesCF = secondary.split(/[, \n\t\r]+/).map(cf).filter(Boolean); // <- lowercase split
 
-    for (const xg of xGenes) {
-      const xa = idx[xg];
-      if (!xa) continue;
+  // lookups
+  const yAnn = annoByCF.get(yGeneCF);
+  const xAnns = xGenesCF.map((g) => ({ g, ann: annoByCF.get(g) })).filter((d) => d.ann);
 
-      const wxs = Math.max(1, xa.start - FLANK_X);
-      const wxe = xa.end + FLANK_X;
-      const binsX = Math.ceil((wxe - wxs + 1) / BIN);
-      const xLenBins = Math.floor((xa.end - xa.start) / BIN);
-      const xStartBin = Math.floor(FLANK_X / BIN);
-      const xEndBin = xStartBin + Math.max(0, xLenBins - 1);
+  // build heatmaps per X-gene
+  const mats = useMemo(() => {
+    if (!yAnn) return [];
+    const wy_s = Math.max(1, yAnn.start - FLANK_Y);
+    const wy_e = yAnn.end + FLANK_Y;
+    const len_y = wy_e - wy_s + 1;
+    const bins_y = Math.ceil(len_y / BIN);
 
-      // filter chimeras that touch both windows
-      const sub = chimeras.filter(({ c1, c2 }) =>
-        ((c1 >= yMeta.ws && c1 <= yMeta.we) || (c2 >= yMeta.ws && c2 <= yMeta.we)) &&
-        ((c1 >= wxs && c1 <= wxe) || (c2 >= wxs && c2 <= wxe))
-      );
-      // fill matrix
-      const mat = Array.from({ length: yMeta.bins }, () => Array.from({ length: binsX }, () => 0));
-      for (const { c1, c2 } of sub) {
-        let yb = -1, xb = -1;
-        if (c1 >= yMeta.ws && c1 <= yMeta.we) yb = toBin(c1, yMeta.ws, yMeta.we, yMeta.strand || "+", BIN);
-        if (c2 >= yMeta.ws && c2 <= yMeta.we) yb = yb >= 0 ? yb : toBin(c2, yMeta.ws, yMeta.we, yMeta.strand || "+", BIN);
-        if (c1 >= wxs && c1 <= wxe) xb = toBin(c1, wxs, wxe, xa.strand || "+", BIN);
-        if (c2 >= wxs && c2 <= wxe) xb = xb >= 0 ? xb : toBin(c2, wxs, wxe, xa.strand || "+", BIN);
-        if (yb >= 0 && yb < yMeta.bins && xb >= 0 && xb < binsX) {
-          mat[yb][xb] += 1;
-        }
+    function toBin(coord: number, ws: number, we: number, strand: string | undefined) {
+      const s = (strand === "-") ? -1 : 1;
+      return s === 1 ? Math.floor((coord - ws) / BIN) : Math.floor((we - coord) / BIN);
+    }
+
+    return xAnns.map(({ g, ann }) => {
+      const wx_s = Math.max(1, ann!.start - FLANK_X);
+      const wx_e = ann!.end + FLANK_X;
+      const len_x = wx_e - wx_s + 1;
+      const bins_x = Math.ceil(len_x / BIN);
+      const mat = Array.from({ length: bins_y }, () => Array(bins_x).fill(0));
+
+      for (const [c1, c2] of contacts) {
+        let b1y = -1, b1x = -1, b2y = -1, b2x = -1;
+        if (c1 >= wy_s && c1 <= wy_e) b1y = toBin(c1, wy_s, wy_e, yAnn.strand);
+        if (c1 >= wx_s && c1 <= wx_e) b1x = toBin(c1, wx_s, wx_e, ann!.strand);
+        if (c2 >= wy_s && c2 <= wy_e) b2y = toBin(c2, wy_s, wy_e, yAnn.strand);
+        if (c2 >= wx_s && c2 <= wx_e) b2x = toBin(c2, wx_s, wx_e, ann!.strand);
+
+        if (b1y !== -1 && b2x !== -1) mat[b1y][b2x] += 1;
+        if (b2y !== -1 && b1x !== -1) mat[b2y][b1x] += 1;
       }
-      out.push({ gene: xg, binsX, mat, xStartBin, xEndBin });
-    }
-    return out;
-  }, [xGenes, idx, chimeras, yMeta, FLANK_X, BIN]);
 
-  function colorFor(colormap: number, v: number) {
-    // simple family: 0=Reds,1=Greens,2=Blues,3=Oranges,4=Purples,5=Greys
-    const t = Math.max(0, Math.min(1, v / Math.max(1, VMAX)));
-    const l = 95 - t * 70; // lighten to darker
-    switch (colormap % 6) {
-      case 0: return `hsl(0 80% ${l}%)`;
-      case 1: return `hsl(140 60% ${l}%)`;
-      case 2: return `hsl(220 70% ${l}%)`;
-      case 3: return `hsl(30 90% ${l}%)`;
-      case 4: return `hsl(280 70% ${l}%)`;
-      default:return `hsl(0 0% ${l}%)`;
-    }
-  }
+      return {
+        gene: g, // already lowercase
+        bins_x, bins_y, wx_s, wx_e, wy_s, wy_e,
+        y_len_bins: Math.floor((yAnn.end - yAnn.start) / BIN),
+        x_len_bins: Math.floor((ann!.end - ann!.start) / BIN),
+        mat,
+      };
+    });
+  }, [contacts, xAnns, yAnn]);
 
-  function downloadSVG() {
-    const node = document.getElementById("pairmap-svg") as SVGSVGElement | null;
-    if (!node) return;
-    const serializer = new XMLSerializer();
-    const svgStr = serializer.serializeToString(node);
-    const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `${primary}_pairmap.svg`; a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  // layout
-  const panelW = 260;      // per X panel width
-  const panelH = 360;      // per panel height
-  const pad = 30;          // gap between panels
-  const leftAxis = 70;
-  const topAxis = 20;
-  const totalW = leftAxis + (panels.length * (panelW + pad)) + 10;
-  const totalH = topAxis + panelH + 80;
+  // rendering sizes
+  const panelW = 340, panelH = 280, pad = 20;
+  const W = Math.max(panelW * Math.max(1, mats.length) + pad * 2, 720);
+  const H = panelH + 100;
 
   return (
-    <div className="mx-auto max-w-[1200px] p-4 space-y-4">
-      <header className="flex flex-col sm:flex-row gap-3 sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">pairMAP — inter-RNA heatmap</h1>
-          <p className="text-xs text-gray-600">
-            Upload Annotations CSV and a BED/TSV/CSV of chimera coordinates (two numeric columns). Enter one primary RNA (Y) and a comma list of partners (X). 5′→3′ on both axes, Y inverted.
-          </p>
+    <div className="mx-auto max-w-[1400px] p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="text-xl font-semibold">pairMAP</h1>
+        <button
+          onClick={() => exportSVG("pairmap-svg", "pairMAP")}
+          className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
+        >
+          Export SVG
+        </button>
+      </div>
+
+      {/* Inputs */}
+      <div className="flex flex-wrap gap-4 mb-4">
+        <div className="flex flex-col gap-2">
+          <label className="text-sm text-slate-700">Primary RNA (Y-axis, case-insensitive)</label>
+          <input className="border rounded px-3 py-2 w-[260px]" value={primaryRNA} onChange={(e)=>setPrimaryRNA(e.target.value)} />
         </div>
-        <div className="flex gap-2">
-          <button className="border rounded px-3 py-1" onClick={downloadSVG}>Export SVG</button>
+        <div className="flex flex-col gap-2">
+          <label className="text-sm text-slate-700">Secondary RNAs (comma-separated, case-insensitive)</label>
+          <input className="border rounded px-3 py-2 w-[380px]" value={secondary} onChange={(e)=>setSecondary(e.target.value)} />
         </div>
-      </header>
+        <div className="flex-1" />
+        <div className="flex flex-col sm:flex-row gap-6">
+          <label className="text-sm">
+            <div className="text-slate-700 mb-1">Annotations CSV</div>
+            <input type="file" accept=".csv" onChange={onAnnoFile}/>
+          </label>
+          <label className="text-sm">
+            <div className="text-slate-700 mb-1">Contacts (.bed or .csv)</div>
+            <input type="file" accept=".bed,.csv" onChange={onContactsFile}/>
+          </label>
+        </div>
+      </div>
 
-      <div className="grid grid-cols-12 gap-4">
-        {/* Controls */}
-        <section className="col-span-12 lg:col-span-3 border rounded-2xl p-4 space-y-3">
-          <div>
-            <div className="text-sm font-medium mb-1">Annotations CSV</div>
-            <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} />
-          </div>
-          <div>
-            <div className="text-sm font-medium mb-1">Chimeras file (.bed / .tsv / .csv)</div>
-            <input ref={fileBedRef} type="file" accept=".bed,.tsv,.csv,.txt" onChange={onBedFile} />
-          </div>
+      {/* Multi-panel heatmaps */}
+      <div className="rounded-lg border bg-white overflow-x-auto">
+        <svg id="pairmap-svg" width={W} height={H} style={{ display: "block" }}>
+          <defs>
+            <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:10px}`}</style>
+          </defs>
+          {mats.map((m, i) => {
+            const left = pad + i * panelW;
+            const top = 30;
 
-          <div className="pt-1">
-            <div className="text-sm font-medium mb-1">Primary RNA (Y-axis)</div>
-            <input className="border rounded px-2 py-1 w-full" value={primary} onChange={e => setPrimary(e.target.value)} />
-          </div>
+            // scales
+            const cw = panelW - 60;
+            const ch = panelH - 60;
+            const cellW = cw / m.bins_x;
+            const cellH = ch / m.bins_y;
 
-          <div>
-            <div className="text-sm font-medium mb-1">Partners (X; comma-separated)</div>
-            <textarea className="w-full border rounded p-2 text-sm" rows={2} value={xListText} onChange={e => setXListText(e.target.value)} placeholder="geneA,geneB,geneC"/>
-          </div>
+            // fixed vmax
+            const VMAX = 10;
 
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <div>
-              <label className="text-xs text-gray-600">FLANK_Y (nt)</label>
-              <input type="number" className="border rounded px-2 py-1 w-full" value={FLANK_Y} onChange={e => setFLANK_Y(Math.max(0, +e.target.value))}/>
-            </div>
-            <div>
-              <label className="text-xs text-gray-600">FLANK_X (nt)</label>
-              <input type="number" className="border rounded px-2 py-1 w-full" value={FLANK_X} onChange={e => setFLANK_X(Math.max(0, +e.target.value))}/>
-            </div>
-            <div>
-              <label className="text-xs text-gray-600">BIN (nt)</label>
-              <input type="number" className="border rounded px-2 py-1 w-full" value={BIN} onChange={e => setBIN(Math.max(1, +e.target.value))}/>
-            </div>
-            <div>
-              <label className="text-xs text-gray-600">VMAX (color max)</label>
-              <input type="number" className="border rounded px-2 py-1 w-full" value={VMAX} onChange={e => setVMAX(Math.max(1, +e.target.value))}/>
-            </div>
-          </div>
-        </section>
+            return (
+              <g key={i} transform={`translate(${left},${top})`}>
+                {/* frame */}
+                <rect x={30} y={10} width={cw} height={ch} fill="#fff" stroke="#222" strokeWidth={1} />
 
-        {/* Plot */}
-        <section className="col-span-12 lg:col-span-9 border rounded-2xl p-4">
-          {!yMeta && <div className="text-sm text-gray-500">Primary RNA not found in annotations.</div>}
-          {!!yMeta && panels.length === 0 && <div className="text-sm text-gray-500">No partner panels to display (check partners or files).</div>}
-          {!!yMeta && panels.length > 0 && (
-            <div className="w-full overflow-x-auto">
-              <svg id="pairmap-svg" width={totalW} height={totalH} className="mx-auto block">
-                {/* Title */}
-                <text x={leftAxis} y={16} className="fill-gray-800 text-[12px]">
-                  {primary} vs {panels.map(p => p.gene).join(", ")} (bin {BIN} nt, vmax {VMAX})
+                {/* grid + cells */}
+                {m.mat.map((row, yy) =>
+                  row.map((v, xx) => {
+                    const val = Math.max(0, Math.min(VMAX, v));
+                    const t = val / VMAX;
+                    // simple colormap (Blues)
+                    const col = `rgba(37,99,235,${t})`;
+                    return (
+                      <rect
+                        key={`${yy}-${xx}`}
+                        x={30 + xx * cellW}
+                        y={10 + yy * cellH}
+                        width={cellW}
+                        height={cellH}
+                        fill={col}
+                        stroke="transparent"
+                      />
+                    );
+                  })
+                )}
+
+                {/* axes labels */}
+                <text x={30 + cw / 2} y={ch + 28} textAnchor="middle">{m.gene} (5′→3′)</text>
+                <text transform={`translate(10,${10 + ch / 2}) rotate(-90)`} textAnchor="middle">
+                  {cf(primaryRNA)} (5′→3′)
                 </text>
 
-                {/* Y axis (shared) ticks on the left of the first panel */}
-                <g transform={`translate(${leftAxis - 10},${topAxis})`}>
-                  {/* ticks for -flank, start, end, +flank */}
-                  {yMeta && (() => {
-                    const rows = yMeta.bins;
-                    const cellH = panelH / rows;
-                    const ty = (bin: number) => {
-                      // invert: row 0 should be at bottom => y = top + (rows - (bin+1)) * cellH
-                      return (rows - (bin + 1)) * cellH;
-                    };
-                    return (
-                      <>
-                        <line x1={10} y1={0} x2={10} y2={panelH} stroke="#222" />
-                        {[0, yMeta.yStartBin, yMeta.yEndBin, yMeta.bins - 1].map((b, i) => (
-                          <g key={i} transform={`translate(10,${ty(b)})`}>
-                            <line x2={-6} stroke="#222" />
-                            <text x={-9} y={3} textAnchor="end" className="fill-gray-700 text-[10px]">
-                              {i === 0 ? `-${FLANK_Y}` : i === 1 ? "start" : i === 2 ? "end" : `+${FLANK_Y}`}
-                            </text>
-                          </g>
-                        ))}
-                        <text transform={`translate(-38,${panelH/2}) rotate(-90)`} className="fill-gray-700 text-[11px]">
-                          {primary} (5′→3′)
-                        </text>
-                      </>
-                    );
-                  })()}
-                </g>
-
-                {/* Panels */}
-                {panels.map((p, i) => {
-                  const left = leftAxis + i * (panelW + pad);
-                  const top = topAxis;
-                  const rows = yMeta!.bins;
-                  const cols = p.binsX;
-                  const cellW = panelW / cols;
-                  const cellH = panelH / rows;
-
-                  return (
-                    <g key={p.gene} transform={`translate(${left},${top})`}>
-                      {/* matrix cells (draw inverted Y) */}
-                      {p.mat.map((row, r) => {
-                        return row.map((v, c) => {
-                          const yInv = rows - (r + 1);
-                          const x = c * cellW;
-                          const y = yInv * cellH;
-                          return (
-                            <rect key={`${r}:${c}`} x={x} y={y} width={cellW} height={cellH} fill={colorFor(i, v)} />
-                          );
-                        });
-                      })}
-                      {/* frame */}
-                      <rect x={0} y={0} width={panelW} height={panelH} fill="none" stroke="#333" strokeWidth={1} />
-
-                      {/* X ticks: -flank, start, end, +flank */}
-                      <g transform={`translate(0,${panelH})`}>
-                        <line x1={0} y1={0} x2={panelW} y2={0} stroke="#222" />
-                        {[0, p.xStartBin, p.xEndBin, p.binsX - 1].map((b, j) => {
-                          const x = (b + 0.5) * cellW;
-                          return (
-                            <g key={j} transform={`translate(${x},0)`}>
-                              <line y2={6} stroke="#222" />
-                              <text y={20} textAnchor="middle" className="fill-gray-700 text-[10px]">
-                                {j === 0 ? `-${FLANK_X}` : j === 1 ? "start" : j === 2 ? "end" : `+${FLANK_X}`}
-                              </text>
-                            </g>
-                          );
-                        })}
-                        <text x={panelW/2} y={36} textAnchor="middle" className="fill-gray-700 text-[11px]">
-                          {p.gene} (5′→3′)
-                        </text>
-                      </g>
-
-                      {/* colorbar label per panel */}
-                      <text x={panelW - 2} y={-6} textAnchor="end" className="fill-gray-700 text-[10px]">
-                        Count (vmax {VMAX})
-                      </text>
+                {/* y ticks: -FLANK_Y, start, end, +FLANK_Y */}
+                {(() => {
+                  const gy_len = m.y_len_bins;
+                  const gy_s = FLANK_Y / BIN;
+                  const gy_e = gy_s + gy_len - 1;
+                  const yticks = [0, gy_s, gy_e, m.bins_y - 1];
+                  const ylbls = [`-${FLANK_Y}`, "start", "end", `+${FLANK_Y}`];
+                  return yticks.map((b, j) => (
+                    <g key={j} transform={`translate(${30},${10 + (b / m.bins_y) * ch})`}>
+                      <line x1={-6} y1={0} x2={0} y2={0} stroke="#222" />
+                      <text x={-9} y={3} textAnchor="end">{ylbls[j]}</text>
                     </g>
-                  );
-                })}
-              </svg>
-            </div>
-          )}
-        </section>
+                  ));
+                })()}
+
+                {/* x ticks for each panel */}
+                {(() => {
+                  const gx_len = m.x_len_bins;
+                  const gx_s = FLANK_X / BIN;
+                  const gx_e = gx_s + gx_len - 1;
+                  const xticks = [0, gx_s, gx_e, m.bins_x - 1];
+                  const xlbls = [`-${FLANK_X}`, "start", "end", `+${FLANK_X}`];
+                  return xticks.map((b, j) => (
+                    <g key={j} transform={`translate(${30 + (b / m.bins_x) * cw},${10 + ch})`}>
+                      <line x1={0} y1={0} x2={0} y2={6} stroke="#222" />
+                      <text x={0} y={18} textAnchor="middle">{xlbls[j]}</text>
+                    </g>
+                  ));
+                })()}
+              </g>
+            );
+          })}
+        </svg>
       </div>
+
+      {!yAnn && (
+        <div className="mt-2 text-xs text-amber-700">
+          Upload annotations and make sure the primary RNA name exists (case-insensitive).
+        </div>
+      )}
     </div>
   );
 }

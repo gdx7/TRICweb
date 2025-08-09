@@ -118,7 +118,7 @@ export default function Page() {
   const [labelThreshold, setLabelThreshold] = useState(50);
   const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["rRNA", "tRNA"]);
   const [query, setQuery] = useState("");
-  const [highlightQuery, setHighlightQuery] = useState("");
+  const [highlightQuery, setHighlightQuery] = useState(""); // genes to face-fill yellow
 
   const filePairsRef = useRef<HTMLInputElement>(null);
   const fileAnnoRef = useRef<HTMLInputElement>(null);
@@ -144,7 +144,7 @@ export default function Page() {
     return new Set(toks);
   }, [highlightQuery]);
 
-  // aggregate by partner: sum counts, max odds_ratio
+  // aggregate edges for focal (sum counts, max odds_ratio), odds_ratio only
   const partners = useMemo<ScatterRow[]>(() => {
     const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
     const acc = new Map<string, ScatterRow>();
@@ -167,7 +167,7 @@ export default function Page() {
       );
 
       const or = Number(e.odds_ratio) || 0;
-      if (!(or > 0)) continue; // only odds_ratio
+      if (!(or > 0)) continue;
 
       const counts = Number(e.counts) || 0;
       const type = (ref === focal ? e.target_type : e.ref_type) || partAnn.feature_type || "CDS";
@@ -213,7 +213,6 @@ export default function Page() {
     if (match) setFocal(match);
   }
 
-  // CSV loaders
   function parsePairsCSV(csv: string) {
     const { data } = Papa.parse<Pair>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows = (data as any[])
@@ -253,7 +252,6 @@ export default function Page() {
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
 
-  // Export SVG with embedded fonts/styles
   function downloadSVG() {
     const el = document.getElementById("scatter-svg") as SVGSVGElement | null;
     if (!el) return;
@@ -279,7 +277,7 @@ export default function Page() {
     <div>
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-3">
-          <div className="text-xl font-semibold">TRIC-seq Interactome Explorer</div>
+          <div className="text-xl font-semibold">Global interaction map</div>
           <div className="text-xs text-gray-500">Demo uses simulated data — upload your CSVs below.</div>
         </div>
       </header>
@@ -526,7 +524,8 @@ function ScatterPlot({
   const xScale = (x: number) => (x / (genomeMax * 1.05)) * innerW;
   const yScale = (v: number) => {
     const t = symlog(v, 10, 10);
-    return innerH - (t / symlog(yCap, 10, 10)) * innerH;
+    const tMax = symlog(yCap, 10, 10);
+    return innerH - (t / tMax) * innerH;
   };
   const sizeScale = (c: number) => Math.sqrt(c) * 2 + 4;
 
@@ -586,7 +585,7 @@ function ScatterPlot({
           {/* points */}
           {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => {
             const highlighted = highlightSet.has(p.partner);
-            const face = highlighted ? "#FFEB3B" : "#FFFFFF";
+            const face = highlighted ? "#FFEB3B" : "#FFFFFF"; // yellow vs white
             return (
               <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
                 <circle

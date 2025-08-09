@@ -1,164 +1,98 @@
+// app/page.tsx
 "use client";
 
 import Link from "next/link";
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 
-export default function HomePage() {
-  // Colors match your feature palette (stroke only, no fill)
-  const ringColors = [
-    "#F78208", // CDS
-    "#76AAD7", // 5'UTR
-    "#0C0C0C", // 3'UTR
-    "#A40194", // ncRNA/sRNA magenta
-    "#82F778", // tRNA
-    "#999999", // rRNA (grey)
-    "#F12C2C", // sponge
-  ];
+// same palette as your plots (stroke-only circles)
+const FEATURE_COLORS = [
+  "#F78208", // CDS
+  "#76AAD7", // 5'UTR
+  "#0C0C0C", // 3'UTR
+  "#A40194", // ncRNA/sRNA magenta
+  "#82F778", // tRNA
+  "#999999", // rRNA
+  "#F12C2C", // sponge
+  "#C4C5C5", // hkRNA
+];
 
-  // Gentle drifting rings
-  const rings = useMemo(() => {
-    const RINGS = 18;
-    const out: Array<{
-      size: number;
-      top: string;
-      left: string;
-      color: string;
-      dur1: string;
-      dur2: string;
-      blur: number;
-      opacity: number;
-    }> = [];
-    for (let i = 0; i < RINGS; i++) {
-      const size = Math.floor(70 + Math.random() * 170);
-      const top = `${Math.floor(Math.random() * 80)}%`;
-      const left = `${Math.floor(Math.random() * 80)}%`;
-      const color = ringColors[i % ringColors.length];
-      const dur1 = `${8 + Math.random() * 10}s`;
-      const dur2 = `${10 + Math.random() * 12}s`;
-      const blur = Math.random() < 0.5 ? 2 : 4;
-      const opacity = 0.22 + Math.random() * 0.18;
-      out.push({ size, top, left, color, dur1, dur2, blur, opacity });
-    }
-    return out;
+type Bubble = { top: number; left: number; size: number; color: string; delay: number; dur: number; dx: number; dy: number; blur: number; };
+
+export default function Home() {
+  // generate a handful of softly drifting, blurred outline circles
+  const bubbles = useMemo<Bubble[]>(() => {
+    const rand = (a: number, b: number) => a + Math.random() * (b - a);
+    return Array.from({ length: 22 }).map(() => ({
+      top: rand(5, 80),      // vh
+      left: rand(5, 90),     // vw
+      size: rand(60, 220),   // px
+      color: FEATURE_COLORS[Math.floor(Math.random() * FEATURE_COLORS.length)],
+      delay: rand(-8, 8),    // s
+      dur: rand(14, 26),     // s
+      dx: rand(-22, 22),     // px
+      dy: rand(-14, 14),     // px
+      blur: rand(0, 2.5),    // px
+    }));
   }, []);
 
   return (
-    <main className="relative min-h-[100svh] overflow-hidden bg-white text-gray-900">
-      {/* Floating rings */}
-      <div className="absolute inset-0 pointer-events-none">
-        {rings.map((r, i) => (
+    <div className="relative overflow-hidden">
+      {/* floating outline circles */}
+      <div className="pointer-events-none absolute inset-0">
+        {bubbles.map((b, i) => (
           <div
             key={i}
-            className="absolute rounded-full"
+            className="absolute rounded-full bg-transparent"
             style={{
-              top: r.top,
-              left: r.left,
-              width: r.size,
-              height: r.size,
-              border: `3px solid ${r.color}`,
-              filter: `blur(${r.blur}px)`,
-              opacity: r.opacity,
-              animation: `driftX ${r.dur1} ease-in-out infinite alternate, driftY ${r.dur2} ease-in-out infinite alternate`,
+              top: `${b.top}vh`,
+              left: `${b.left}vw`,
+              width: b.size,
+              height: b.size,
+              border: `3px solid ${b.color}`,
+              filter: `blur(${b.blur}px)`,
+              animation: `drift ${b.dur}s ease-in-out ${b.delay}s infinite`,
+              // custom per-bubble offsets
+              // @ts-ignore
+              "--dx": `${b.dx}px`,
+              "--dy": `${b.dy}px`,
             }}
           />
         ))}
       </div>
 
-      {/* Hero content */}
-      <div className="relative z-10 mx-auto max-w-5xl px-6 pt-20 pb-10">
-        <div className="text-center">
-          <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight">
-            TRIC-seq Interactome Explorer
-          </h1>
-          <p className="mt-3 text-base sm:text-lg text-gray-600">
-            Explore global RNA–RNA interaction maps, generate collapsed csMAPs, and
-            build pairwise inter-RNA heatmaps—in your browser.
-          </p>
-        </div>
+      {/* hero content */}
+      <section className="relative mx-auto max-w-5xl px-6 py-20 sm:py-28">
+        <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
+          TRIC-seq Interactome Explorer
+        </h1>
+        <p className="mt-4 text-lg text-slate-600 max-w-3xl">
+          Explore E. coli RNA–RNA interactomes. Upload your pairs + annotation tables or try the simulator.
+          Click a tool to begin:
+        </p>
 
-        {/* Buttons */}
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-          <CTA href="/global" label="GlobalMAP" color="#76AAD7" />
-          <CTA href="/csmap" label="csMAP" color="#A40194" />
-          <CTA href="/pairmap" label="pairMAP" color="#F78208" />
+        {/* big buttons */}
+        <div className="mt-10 grid gap-4 sm:grid-cols-3">
+          <ToolCard title="globalMAP" href="/global" desc="Gene-centric global interaction map with clickable partners." />
+          <ToolCard title="csMAP" href="/csmap" desc="Collapsed multi-gene profiles and totals (local peaks)." />
+          <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA multi-panel heatmaps from raw chimeras." />
         </div>
-
-        {/* Quick tips */}
-        <div className="mt-10 grid sm:grid-cols-3 gap-4 text-sm text-gray-600">
-          <Tip>
-            <b>GlobalMAP:</b> search an RNA, click partners to re-center, export SVG.
-          </Tip>
-          <Tip>
-            <b>csMAP:</b> paste a comma/space gene list and upload your CSVs to
-            compare peaks across RNAs.
-          </Tip>
-          <Tip>
-            <b>pairMAP:</b> enter a pair and upload your .bed chimeras to see a
-            2D heatmap.
-          </Tip>
-        </div>
-      </div>
-
-      {/* Footer with lab logo */}
-      <footer className="relative z-10 mx-auto max-w-5xl px-6 pb-10">
-        <div className="mt-12 pt-6 border-t flex items-center justify-center gap-3">
-          <a
-            href="https://www.drna.nl"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group inline-flex items-center gap-3"
-          >
-            {/* Put your logo file at /public/drna-logo.png */}
-            <img
-              src="/drna-logo.png"
-              alt="dRNA Lab"
-              width={44}
-              height={44}
-              className="opacity-80 group-hover:opacity-100 transition-opacity"
-            />
-            <span className="text-xs text-gray-600">
-              a <span className="font-medium text-gray-800">dRNA Lab</span> production
-            </span>
-          </a>
-        </div>
-      </footer>
-
-      {/* Page styles (animations) */}
-      <style jsx global>{`
-        @keyframes driftX {
-          0% { transform: translateX(0px); }
-          100% { transform: translateX(30px); }
-        }
-        @keyframes driftY {
-          0% { transform: translateY(0px); }
-          100% { transform: translateY(-24px); }
-        }
-      `}</style>
-    </main>
+      </section>
+    </div>
   );
 }
 
-function CTA({ href, label, color }: { href: string; label: string; color: string }) {
+function ToolCard({ title, desc, href }: { title: string; desc: string; href: string }) {
   return (
     <Link
       href={href}
-      className="inline-flex items-center justify-center rounded-full px-7 py-3 text-base font-medium bg-white/70 hover:bg-white
-                 ring-2 transition focus:outline-none focus-visible:ring-4"
-      style={{
-        color: "#111827",
-        borderColor: color,
-        boxShadow: `0 0 0 2px ${color} inset`,
-      }}
+      className="group block rounded-2xl border bg-white/80 backdrop-blur shadow-sm hover:shadow-md transition
+                 p-6 ring-1 ring-slate-200 hover:ring-slate-300"
     >
-      {label}
+      <div className="text-xl font-semibold">{title}</div>
+      <p className="mt-2 text-slate-600 text-sm">{desc}</p>
+      <div className="mt-4 inline-flex items-center gap-1 text-blue-600 group-hover:gap-2 transition">
+        Open →
+      </div>
     </Link>
-  );
-}
-
-function Tip({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border bg-white/70 p-3">
-      {children}
-    </div>
   );
 }

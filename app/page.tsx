@@ -4,34 +4,23 @@
 import Link from "next/link";
 import { useMemo } from "react";
 
-// same palette as your plots (stroke-only circles)
-const FEATURE_COLORS = [
-  "#F78208", // CDS
-  "#76AAD7", // 5'UTR
-  "#0C0C0C", // 3'UTR
-  "#A40194", // ncRNA/sRNA magenta
-  "#82F778", // tRNA
-  "#999999", // rRNA
-  "#F12C2C", // sponge
-  "#C4C5C5", // hkRNA
-];
+const FEATURE_COLORS = ["#F78208","#76AAD7","#0C0C0C","#A40194","#82F778","#999999","#F12C2C","#C4C5C5"];
 
 type Bubble = { top: number; left: number; size: number; color: string; delay: number; dur: number; dx: number; dy: number; blur: number; };
 
 export default function Home() {
-  // generate a handful of softly drifting, blurred outline circles
   const bubbles = useMemo<Bubble[]>(() => {
     const rand = (a: number, b: number) => a + Math.random() * (b - a);
     return Array.from({ length: 22 }).map(() => ({
-      top: rand(5, 80),      // vh
-      left: rand(5, 90),     // vw
-      size: rand(60, 220),   // px
+      top: rand(5, 80),           // vh
+      left: rand(5, 90),          // vw
+      size: rand(60, 220),        // px
       color: FEATURE_COLORS[Math.floor(Math.random() * FEATURE_COLORS.length)],
-      delay: rand(-8, 8),    // s
-      dur: rand(14, 26),     // s
-      dx: rand(-22, 22),     // px
-      dy: rand(-14, 14),     // px
-      blur: rand(0, 2.5),    // px
+      delay: rand(-6, 6),         // s (slightly tighter)
+      dur: rand(9, 16),           // s (faster than before)
+      dx: rand(-26, 26),          // px (subtle drift)
+      dy: rand(-18, 18),          // px
+      blur: rand(2, 5),           // px (more blurry)
     }));
   }, []);
 
@@ -51,7 +40,6 @@ export default function Home() {
               border: `3px solid ${b.color}`,
               filter: `blur(${b.blur}px)`,
               animation: `drift ${b.dur}s ease-in-out ${b.delay}s infinite`,
-              // custom per-bubble offsets
               // @ts-ignore
               "--dx": `${b.dx}px`,
               "--dy": `${b.dy}px`,
@@ -60,7 +48,6 @@ export default function Home() {
         ))}
       </div>
 
-      {/* hero content */}
       <section className="relative mx-auto max-w-5xl px-6 py-20 sm:py-28">
         <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
           TRIC-seq Interactome Explorer
@@ -70,7 +57,6 @@ export default function Home() {
           Click a tool to begin:
         </p>
 
-        {/* big buttons */}
         <div className="mt-10 grid gap-4 sm:grid-cols-3">
           <ToolCard title="globalMAP" href="/global" desc="Gene-centric global interaction map with clickable partners." />
           <ToolCard title="csMAP" href="/csmap" desc="Collapsed multi-gene profiles and totals (local peaks)." />

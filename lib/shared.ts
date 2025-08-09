@@ -1,8 +1,18 @@
 // lib/shared.ts
+// Common types + helpers used across /global, /csmap, /pairmap
+
 import Papa from "papaparse";
 
+// ---------- Types ----------
 export type FeatureType =
-  | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA"
+  | "CDS"
+  | "5'UTR"
+  | "3'UTR"
+  | "ncRNA"
+  | "tRNA"
+  | "rRNA"
+  | "sRNA"
+  | "hkRNA"
   | string;
 
 export type Annotation = {
@@ -24,8 +34,10 @@ export type Pair = {
   total_ref?: number;
   ref_type?: FeatureType;
   target_type?: FeatureType;
+  // optional extra cols are fine
 };
 
+// ---------- Colors + small helpers ----------
 export const FEATURE_COLORS: Record<FeatureType, string> = {
   ncRNA: "#A40194",
   sRNA: "#B84AE2",
@@ -38,27 +50,40 @@ export const FEATURE_COLORS: Record<FeatureType, string> = {
   rRNA: "#999999",
 };
 
-export const pickColor = (ft?: FeatureType) =>
-  FEATURE_COLORS[ft || "CDS"] || "#F78208";
+export function pickColor(ft?: FeatureType) {
+  return FEATURE_COLORS[ft || "CDS"] || "#F78208";
+}
 
-// symlog + inverse (for plotting)
 export function symlog(y: number, linthresh = 10, base = Math.E) {
   const s = Math.sign(y);
   const a = Math.abs(y);
   return a <= linthresh ? s * (a / linthresh) : s * (1 + Math.log(a / linthresh) / Math.log(base));
 }
-export function invSymlog(t: number, linthresh = 10, base = Math.E) {
-  const s = Math.sign(t);
-  const a = Math.abs(t);
-  return a <= 1 ? s * a * linthresh : s * linthresh * Math.pow(base, (a - 1));
+
+// ---------- Index + distance ----------
+export function geneIndex(annotations: Annotation[]) {
+  const idx: Record<string, Annotation> = {};
+  for (const a of annotations) idx[a.gene_name] = a;
+  return idx;
 }
 
-// CSV parsers
-export function parsePairsCSV(csv: string) {
+export function distanceBetween(a?: Annotation, b?: Annotation) {
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+  return Math.min(
+    Math.abs(a.start - b.end),
+    Math.abs(a.end - b.start),
+    Math.abs(a.start - b.start),
+    Math.abs(a.end - b.end)
+  );
+}
+
+// ---------- CSV parsers (expect headers) ----------
+export function parsePairsCSV(csv: string): Pair[] {
   const { data } = Papa.parse<Pair>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
   return (data as any[]).filter(r => r.ref && r.target) as Pair[];
 }
-export function parseAnnoCSV(csv: string) {
+
+export function parseAnnoCSV(csv: string): Annotation[] {
   const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
   return (data as any[])
     .filter(r => r.gene_name && (r.start != null) && (r.end != null))

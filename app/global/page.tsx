@@ -39,13 +39,12 @@ type ScatterRow = {
   x: number;
   y: number;       // capped OR for plotting
   rawY: number;    // true odds_ratio
-  counts: number;  // summed counts across duplicates
+  counts: number;  // deduped counts (max across orientations)
   type: FeatureType;
   distance: number;
 };
 
 const FEATURE_COLORS: Record<FeatureType, string> = {
-  // sRNA and ncRNA share magenta
   ncRNA: "#A40194",
   sRNA: "#A40194",
   sponge: "#F12C2C",
@@ -118,7 +117,7 @@ export default function Page() {
   const [labelThreshold, setLabelThreshold] = useState(50);
   const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["rRNA", "tRNA"]);
   const [query, setQuery] = useState("");
-  const [highlightQuery, setHighlightQuery] = useState(""); // genes to face-fill yellow
+  const [highlightQuery, setHighlightQuery] = useState("");
 
   const filePairsRef = useRef<HTMLInputElement>(null);
   const fileAnnoRef = useRef<HTMLInputElement>(null);
@@ -144,7 +143,9 @@ export default function Page() {
     return new Set(toks);
   }, [highlightQuery]);
 
-  // aggregate edges for focal (sum counts, max odds_ratio), odds_ratio only
+  // aggregate edges for focal (dedupe symmetric rows):
+  // - counts: take MAX across orientations (avoid doubling)
+  // - odds_ratio: take MAX
   const partners = useMemo<ScatterRow[]>(() => {
     const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
     const acc = new Map<string, ScatterRow>();
@@ -174,10 +175,11 @@ export default function Page() {
 
       const prev = acc.get(partner);
       if (prev) {
-        prev.counts += counts;
+        // ✅ fix: avoid double-counting opposite-orientation duplicates
+        prev.counts = Math.max(prev.counts, counts);
         prev.rawY = Math.max(prev.rawY, or);
         prev.y = Math.min(prev.rawY, yCap);
-        prev.type = prev.type || (type as FeatureType);
+        prev.type = (prev.type || type) as FeatureType;
         prev.distance = Math.min(prev.distance, dist);
       } else {
         acc.set(partner, {
@@ -207,9 +209,10 @@ export default function Page() {
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!query) return;
+    const q = query.toLowerCase();
     const match =
-      allGenes.find(g => g.toLowerCase() === query.toLowerCase()) ||
-      allGenes.find(g => g.toLowerCase().includes(query.toLowerCase()));
+      allGenes.find(g => g.toLowerCase() === q) ||
+      allGenes.find(g => g.toLowerCase().includes(q));
     if (match) setFocal(match);
   }
 
@@ -297,7 +300,6 @@ export default function Page() {
               <button className="border rounded px-3">Go</button>
             </form>
 
-            {/* Highlight list for yellow face color */}
             <div className="mt-3">
               <div className="text-xs text-gray-600 mb-1">Highlight genes (comma/space-separated)</div>
               <input
@@ -420,7 +422,6 @@ export default function Page() {
               onClickPartner={(name) => setFocal(name)}
             />
 
-            {/* Legend below the plot (no obstruction) */}
             <div className="mt-3 flex flex-wrap gap-4 items-center">
               <span className="text-sm font-medium">Feature types</span>
               {["CDS","5'UTR","3'UTR","ncRNA","sRNA","tRNA","rRNA","sponge","hkRNA"].map(k => (
@@ -585,7 +586,7 @@ function ScatterPlot({
           {/* points */}
           {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => {
             const highlighted = highlightSet.has(p.partner);
-            const face = highlighted ? "#FFEB3B" : "#FFFFFF"; // yellow vs white
+            const face = highlighted ? "#FFEB3B" : "#FFFFFF";
             return (
               <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
                 <circle

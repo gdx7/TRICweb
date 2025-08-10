@@ -50,10 +50,10 @@ export default function Home() {
 
       <section className="relative mx-auto max-w-5xl px-6 py-20 sm:py-28">
         <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
-          TRIC-seq Interactome Explorer
+          TRIC-seq Explorer
         </h1>
         <p className="mt-4 text-lg text-slate-600 max-w-3xl">
-          Explore E. coli RNA–RNA interactomes. Upload your pairs + annotation tables or try the simulator.
+          Explore global RNA–RNA interactions in bacteria
           Click a tool to begin:
         </p>
 

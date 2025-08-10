@@ -382,7 +382,10 @@ export default function FoldMapPage() {
         <div className="col-span-12 lg:col-span-9 space-y-6">
           <section className="border rounded-2xl p-3">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-sm text-gray-700">{geneRow ? label : "Load CSVs and enter a gene"}</div>
+              <div className="text-sm text-gray-700">
+  Long-range (&gt; 5 kb) interaction profile {geneRow ? `— ${geneRow.gene_name}` : ""}
+</div>
+
               <button
                 className="text-xs border rounded px-2 py-1"
                 onClick={() => downloadSVG("fold-heatmap", `${gene}_foldMAP_heatmap`)}

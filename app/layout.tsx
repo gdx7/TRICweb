@@ -7,7 +7,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
   title: "TRIC-seq Interactome Explorer",
-  description: "Explore RNA–RNA interactomes: globalMAP, csMAP, pairMAP",
+  description: "Explore RNA–RNA interactomes: globalMAP, csMAP, pairMAP, foldMAP",
   icons: { icon: "/drna-logo.png" }, // optional favicon
 };
 
@@ -25,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/global">globalMAP</Link>
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/csmap">csMAP</Link>
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/pairmap">pairMAP</Link>
+              <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/foldmap">foldMAP</Link>
             </nav>
           </div>
         </header>

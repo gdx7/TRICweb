@@ -200,11 +200,11 @@ export default function FoldMapPage() {
   const [ann, setAnn] = useState<Annotation[]>([]);
   const [ints, setInts] = useState<Interaction[]>([]);
 
-  const [inputGene, setInputGene] = useState("");
-  const [selectedGene, setSelectedGene] = useState("");
+  const [inputGene, setInputGene] = useState("");     // what user types
+  const [selectedGene, setSelectedGene] = useState(""); // what we commit on submit
 
   const [bin, setBin] = useState(10);
-  const [flank, setFlank] = useState(200);
+  const [flank, setFlank] = useState(200); // common flank for BOTH plots
   const [norm, setNorm] = useState<"raw" | "ice">("raw");
 
   const [profileWin, setProfileWin] = useState(5);
@@ -221,23 +221,18 @@ export default function FoldMapPage() {
     return ann.find((a) => a.gene_name.toLowerCase() === q) || ann.find((a) => a.gene_name.toLowerCase().includes(q));
   }, [ann, selectedGene]);
 
-  // Shared window for both plots
-  const windowBundle = useMemo(() => {
-    if (!geneRow) return undefined;
-    const ws = Math.max(1, geneRow.start - clamp(flank, 0, 500));
-    const we = geneRow.end + clamp(flank, 0, 500);
-    return { ws, we, width: we - ws + 1 };
-  }, [geneRow, flank]);
-
   const matBundle = useMemo(() => {
     if (!geneRow || !ints.length) return undefined;
     return buildSelfMatrix(ints, geneRow.start, geneRow.end, geneRow.strand, clamp(flank, 0, 500), clamp(bin, 1, 200));
   }, [geneRow, ints, flank, bin]);
 
+  // Long-range profile across the SAME WINDOW (ws..we) — flank shared
   const longProfile = useMemo(() => {
-    if (!geneRow || !ints.length || !windowBundle) return undefined;
-    const { ws, we, width } = windowBundle;
+    if (!geneRow || !ints.length) return undefined;
+    const ws = Math.max(1, geneRow.start - clamp(flank, 0, 500));
+    const we = geneRow.end + clamp(flank, 0, 500);
     const strand = (geneRow.strand || "+").toString();
+    const width = we - ws + 1;
 
     const inWin = (c: number) => c >= ws && c <= we;
     const inNear = (c: number) => c >= ws - 5000 && c <= we + 5000;
@@ -260,7 +255,7 @@ export default function FoldMapPage() {
     const sm = movingAverage(prof, clamp(profileWin, 1, 51));
     const peaks = findLocalMaxima(sm, clamp(profileMinDist, 1, 50), std(sm) * profilePromFactor);
     return { ws, we, prof, smooth: sm, peaks };
-  }, [geneRow, ints, windowBundle, profileWin, profileMinDist, profilePromFactor]);
+  }, [geneRow, ints, flank, profileWin, profileMinDist, profilePromFactor]);
 
   async function onAnnFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
@@ -278,12 +273,10 @@ export default function FoldMapPage() {
   }
 
   function exportMatrixSVG() {
-    if (!geneRow || !matBundle || !windowBundle) return;
+    if (!geneRow || !matBundle) return;
     const mat = norm === "raw" ? matBundle.raw : matBundle.ice;
-    // Use the same width and x scaling as the profile
-    const width = 840, height = 680;
-    const padL = 54, padR = 18, padT = 44, padB = 44;
-    const W = width - padL - padR, H = height - padT - padB;
+    const width = 680, height = 680;
+    const pad = 44, x0 = pad, y0 = pad, W = width - pad * 2, H = height - pad * 2;
     const cw = W / matBundle.nBins, ch = H / matBundle.nBins;
 
     const vals = (mat as number[][]).flat().filter((v) => v > 0);
@@ -302,35 +295,34 @@ export default function FoldMapPage() {
     for (let i = 0; i < matBundle.nBins; i++) {
       for (let j = 0; j < matBundle.nBins; j++) {
         const v = (mat as number[][])[i][j];
-        // Original Y orientation (top to bottom)
-        rects += `<rect x="${padL + j * cw}" y="${padT + i * ch}" width="${cw}" height="${ch}" fill="${v > 0 ? color(v) : "#ffffff"}"/>`;
+        rects += `<rect x="${x0 + j * cw}" y="${y0 + i * ch}" width="${cw}" height="${ch}" fill="${v > 0 ? color(v) : "#ffffff"}"/>`;
       }
     }
 
     // overlays for flanks + gene region lines
-    const lfW = bStart * cw, rfX = padL + bEndEdge * cw, rfW = W - bEndEdge * cw;
+    const lfW = bStart * cw, rfX = x0 + bEndEdge * cw, rfW = W - bEndEdge * cw;
     const overlay = `
-      <rect x="${padL}" y="${padT}" width="${lfW}" height="${H}" fill="#000000" opacity="0.04"/>
-      <rect x="${rfX}" y="${padT}" width="${rfW}" height="${H}" fill="#000000" opacity="0.04"/>
-      <line x1="${padL + bStart * cw}" y1="${padT}" x2="${padL + bStart * cw}" y2="${padT + H}" stroke="#111827" stroke-width="1"/>
-      <line x1="${padL + bEndEdge * cw}" y1="${padT}" x2="${padL + bEndEdge * cw}" y2="${padT + H}" stroke="#111827" stroke-width="1"/>
-      <line x1="${padL}" y1="${padT + bStart * ch}" x2="${padL + W}" y2="${padT + bStart * ch}" stroke="#111827" stroke-width="1"/>
-      <line x1="${padL}" y1="${padT + bEndEdge * ch}" x2="${padL + W}" y2="${padT + bEndEdge * ch}" stroke="#111827" stroke-width="1"/>
+      <rect x="${x0}" y="${y0}" width="${lfW}" height="${H}" fill="#000000" opacity="0.04"/>
+      <rect x="${rfX}" y="${y0}" width="${rfW}" height="${H}" fill="#000000" opacity="0.04"/>
+      <line x1="${x0 + bStart * cw}" y1="${y0}" x2="${x0 + bStart * cw}" y2="${y0 + H}" stroke="#111827" stroke-width="1"/>
+      <line x1="${x0 + bEndEdge * cw}" y1="${y0}" x2="${x0 + bEndEdge * cw}" y2="${y0 + H}" stroke="#111827" stroke-width="1"/>
+      <line x1="${x0}" y1="${y0 + bStart * ch}" x2="${x0 + W}" y2="${y0 + bStart * ch}" stroke="#111827" stroke-width="1"/>
+      <line x1="${x0}" y1="${y0 + bEndEdge * ch}" x2="${x0 + W}" y2="${y0 + bEndEdge * ch}" stroke="#111827" stroke-width="1"/>
     `;
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
       <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>
-      <text x="${padL}" y="${padT - 10}" font-family="ui-sans-serif" font-size="12">${geneRow.gene_name} — ${norm.toUpperCase()} (bin ${matBundle.bin} nt, flank ${flank} nt)</text>
+      <text x="${x0}" y="${y0 - 10}" font-family="ui-sans-serif" font-size="12">${geneRow.gene_name} — ${norm.toUpperCase()} (bin ${matBundle.bin} nt, flank ${flank} nt)</text>
       ${rects}
       ${overlay}
-      <text x="${padL + W / 2}" y="${height - 10}" text-anchor="middle" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
-      <text transform="translate(18,${padT + H / 2}) rotate(-90)" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
+      <text x="${x0 + W / 2}" y="${height - 10}" text-anchor="middle" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
+      <text transform="translate(16,${y0 + H / 2}) rotate(-90)" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
     </svg>`;
     downloadText(`${geneRow.gene_name}_foldMAP_${norm}.svg`, svg);
   }
 
   function exportProfileSVG() {
-    if (!geneRow || !longProfile || !windowBundle) return;
+    if (!geneRow || !longProfile) return;
     const width = 840, height = 300;
     const padL = 54, padR = 18, padT = 28, padB = 44;
     const innerW = width - padL - padR, innerH = height - padT - padB;
@@ -385,20 +377,6 @@ export default function FoldMapPage() {
     if (!matBundle) return undefined;
     return norm === "raw" ? matBundle.raw : matBundle.ice;
   }, [matBundle, norm]);
-
-  // x axis bin count and scale for both plots
-  const sharedXAxis = useMemo(() => {
-    if (!windowBundle) return undefined;
-    return {
-      width: 840,
-      padL: 54,
-      padR: 18,
-      W: 840 - 54 - 18,
-      ws: windowBundle.ws,
-      we: windowBundle.we,
-      nBins: windowBundle.we - windowBundle.ws + 1,
-    };
-  }, [windowBundle]);
 
   return (
     <div className="mx-auto max-w-7xl p-4">
@@ -495,114 +473,116 @@ export default function FoldMapPage() {
           </section>
         </div>
 
-// ... (previous code unchanged above)
-
         {/* Plots */}
         <div className="col-span-12 lg:col-span-9 space-y-4">
-          {/* Combined figure: both map and profile, shared x-axis */}
+          {/* Self contact map */}
           <section className="border rounded-2xl p-3">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-sm text-gray-700">
-                {geneRow ? `Intramolecular contact map & long-range profile — ${geneRow.gene_name}` : "Intramolecular contact map & long-range profile"}
-              </div>
-              {matBundle && longProfile && (
-                <div className="text-[11px] text-gray-500">
-                  bins: {matBundle.nBins} × {matBundle.nBins} (bin {matBundle.bin} nt, flank {flank} nt) • peaks: {longProfile.peaks.length}
-                </div>
+              <div className="text-sm text-gray-700">Intramolecular contact map {geneRow ? `— ${geneRow.gene_name}` : ""}</div>
+              {matBundle && (
+                <div className="text-[11px] text-gray-500">bins: {matBundle.nBins} × {matBundle.nBins} (bin {matBundle.bin} nt, flank {flank} nt)</div>
               )}
             </div>
+
             <div className="w-full overflow-auto">
-              {geneRow && dispMat && longProfile && sharedXAxis ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width={sharedXAxis.width} height={1000} className="mx-auto block border rounded">
+              {geneRow && dispMat ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width={680} height={680} className="mx-auto block border rounded">
                   {(() => {
-                    // MAP
-                    const padL = sharedXAxis.padL, padR = sharedXAxis.padR, padT = 44, padB = 44;
-                    const W = sharedXAxis.W, H = 680 - padT - padB;
-                    const mapMat = dispMat as number[][];
-                    const mapVals = mapMat.flat().filter((v) => v > 0);
-                    const mapVmax = mapVals.length ? percentile(mapVals, 95) : 1;
-                    const mapColor = (v: number) => {
-                      const t = Math.min(1, v / (mapVmax || 1));
+                    const mat = dispMat as number[][];
+                    const pad = 44, x0 = pad, y0 = pad, W = 680 - pad * 2, H = 680 - pad * 2;
+                    const cw = W / matBundle!.nBins, ch = H / matBundle!.nBins;
+                    const vals = mat.flat().filter((v) => v > 0);
+                    const vmax = vals.length ? percentile(vals, 95) : 1;
+                    const color = (v: number) => {
+                      const t = Math.min(1, v / (vmax || 1));
                       const r = 255, g = Math.round(255 * (1 - t)), b = Math.round(255 * (1 - t));
                       return `rgb(${r},${g},${b})`;
                     };
-                    const mapY0 = padT;
-                    const mapCw = W / matBundle!.nBins, mapCh = H / matBundle!.nBins;
+
+                    // cells
+                    const cells: JSX.Element[] = [];
+                    for (let i = 0; i < matBundle!.nBins; i++) {
+                      for (let j = 0; j < matBundle!.nBins; j++) {
+                        const v = mat[i][j];
+                        cells.push(<rect key={`${i}-${j}`} x={x0 + j * cw} y={y0 + i * ch} width={cw} height={ch} fill={v > 0 ? color(v) : "#ffffff"} />);
+                      }
+                    }
+
                     // gene region + flanks
                     const bStart = Math.floor((geneRow.start - matBundle!.ws) / matBundle!.bin);
                     const bEndEdge = Math.floor((geneRow.end - matBundle!.ws) / matBundle!.bin) + 1;
-                    const leftW = bStart * mapCw, rightX = padL + bEndEdge * mapCw, rightW = W - bEndEdge * mapCw;
-                    const mapCells: JSX.Element[] = [];
-                    for (let i = 0; i < matBundle!.nBins; i++) {
-                      for (let j = 0; j < matBundle!.nBins; j++) {
-                        const v = mapMat[i][j];
-                        mapCells.push(
-                          <rect
-                            key={`${i}-${j}`}
-                            x={padL + j * mapCw}
-                            y={mapY0 + i * mapCh}
-                            width={mapCw}
-                            height={mapCh}
-                            fill={v > 0 ? mapColor(v) : "#ffffff"}
-                          />
-                        );
-                      }
-                    }
-                    // overlays/lines (same as SVG export)
-                    const overlay = (
-                      <>
-                        <rect x={padL} y={mapY0} width={leftW} height={H} fill="#000000" opacity="0.04" />
-                        <rect x={rightX} y={mapY0} width={rightW} height={H} fill="#000000" opacity="0.04" />
-                        <line x1={padL + bStart * mapCw} y1={mapY0} x2={padL + bStart * mapCw} y2={mapY0 + H} stroke="#111827" strokeWidth={1} />
-                        <line x1={padL + bEndEdge * mapCw} y1={mapY0} x2={padL + bEndEdge * mapCw} y2={mapY0 + H} stroke="#111827" strokeWidth={1} />
-                        <line x1={padL} y1={mapY0 + bStart * mapCh} x2={padL + W} y2={mapY0 + bStart * mapCh} stroke="#111827" strokeWidth={1} />
-                        <line x1={padL} y1={mapY0 + bEndEdge * mapCh} x2={padL + W} y2={mapY0 + bEndEdge * mapCh} stroke="#111827" strokeWidth={1} />
-                      </>
-                    );
+                    const leftW = bStart * cw, rightX = x0 + bEndEdge * cw, rightW = W - bEndEdge * cw;
 
-                    // PROFILE
-                    const profilePadT = padT + H + 30, profilePadB = 44, profileHeight = 300, profileInnerH = profileHeight - 28 - profilePadB;
-                    const profileVals = longProfile.smooth;
-                    const maxY = Math.max(1, ...profileVals);
-                    const xScale = (i: number) => padL + (i / Math.max(1, profileVals.length - 1)) * W;
-                    const yScale = (v: number) => profilePadT + 28 + profileInnerH - (v / maxY) * profileInnerH;
-                    const geneStartPos = geneRow.start - longProfile.ws;
-                    const geneEndPos = geneRow.end - longProfile.ws;
-                    const w = Math.max(1, W / Math.max(1, profileVals.length));
-                    const bars: JSX.Element[] = [];
-                    for (let i = 0; i < profileVals.length; i++) {
-                      const x = xScale(i), y = yScale(profileVals[i]);
-                      bars.push(<rect key={i} x={x} y={y} width={w} height={profilePadT + 28 + profileInnerH - y} fill="#e5e7eb" />);
-                    }
-                    const dots = longProfile.peaks.map((i, k) => <circle key={k} cx={xScale(i)} cy={yScale(profileVals[i])} r={3} fill="#ef4444" />);
-                    const profileOverlay = (
-                      <>
-                        <rect x={padL} y={profilePadT + 28} width={xScale(geneStartPos) - padL} height={profileInnerH} fill="#000000" opacity="0.04" />
-                        <rect x={xScale(geneEndPos)} y={profilePadT + 28} width={padL + W - xScale(geneEndPos)} height={profileInnerH} fill="#000000" opacity="0.04" />
-                        <line x1={xScale(geneStartPos)} y1={profilePadT + 28} x2={xScale(geneStartPos)} y2={profilePadT + 28 + profileInnerH} stroke="#111827" strokeWidth={1} />
-                        <line x1={xScale(geneEndPos)} y1={profilePadT + 28} x2={xScale(geneEndPos)} y2={profilePadT + 28 + profileInnerH} stroke="#111827" strokeWidth={1} />
-                      </>
-                    );
-
-                    // x-axis (drawn only once, at the bottom)
                     return (
                       <>
-                        {/* Map */}
-                        <rect x="0" y="0" width={sharedXAxis.width} height={padT + H} fill="#fff" />
-                        <text x={padL} y={padT - 10} fontFamily="ui-sans-serif" fontSize={12}>{geneRow.gene_name} — {norm.toUpperCase()} (bin {matBundle.bin} nt, flank {flank} nt)</text>
-                        {mapCells}
-                        {overlay}
-                        <text x={padL + W / 2} y={padT + H + 20} textAnchor="middle" fontSize={11} fill="#6b7280">5′ → 3′ (bins)</text>
-                        <text transform={`translate(18,${padT + H / 2}) rotate(-90)`} fontSize={11} fill="#6b7280" textAnchor="middle">5′ → 3′ (bins)</text>
+                        {/* flanks shading */}
+                        <rect x={x0} y={y0} width={leftW} height={H} fill="#000000" opacity="0.04" />
+                        <rect x={rightX} y={y0} width={rightW} height={H} fill="#000000" opacity="0.04" />
+                        {/* cells */}
+                        {cells}
+                        {/* boundaries */}
+                        <line x1={x0 + bStart * cw} y1={y0} x2={x0 + bStart * cw} y2={y0 + H} stroke="#111827" strokeWidth={1} />
+                        <line x1={x0 + bEndEdge * cw} y1={y0} x2={x0 + bEndEdge * cw} y2={y0 + H} stroke="#111827" strokeWidth={1} />
+                        <line x1={x0} y1={y0 + bStart * ch} x2={x0 + W} y2={y0 + bStart * ch} stroke="#111827" strokeWidth={1} />
+                        <line x1={x0} y1={y0 + bEndEdge * ch} x2={x0 + W} y2={y0 + bEndEdge * ch} stroke="#111827" strokeWidth={1} />
+                        {/* labels */}
+                        <text x={x0 + W / 2} y={680 - 12} textAnchor="middle" fontSize={11} fill="#6b7280">5′ → 3′ (bins)</text>
+                        <text x={18} y={y0 + H / 2} fontSize={11} fill="#6b7280" transform={`rotate(-90 18 ${y0 + H / 2})`} textAnchor="middle">5′ → 3′ (bins)</text>
+                      </>
+                    );
+                  })()}
+                </svg>
+              ) : (
+                <div className="text-sm text-gray-500 p-6 text-center">Load data, enter a gene, then press <span className="font-medium">Load</span>.</div>
+              )}
+            </div>
+          </section>
 
-                        {/* Profile */}
-                        <rect x="0" y={profilePadT} width={sharedXAxis.width} height={profileHeight} fill="#fff" />
-                        <text x={padL} y={profilePadT + 18} fontFamily="ui-sans-serif" fontSize={12}>Long-range (≥ 5 kb) interaction profile — {geneRow.gene_name}</text>
+          {/* Long-range profile */}
+          <section className="border rounded-2xl p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm text-gray-700">Long-range (&gt; 5 kb) interaction profile {geneRow ? `— ${geneRow.gene_name}` : ""}</div>
+              {longProfile && <div className="text-[11px] text-gray-500">peaks: {longProfile.peaks.length} • window flank: {flank} nt</div>}
+            </div>
+
+            <div className="w-full overflow-auto">
+              {geneRow && longProfile ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width={840} height={300} className="mx-auto block">
+                  {(() => {
+                    const padL = 54, padR = 18, padT = 28, padB = 44;
+                    const W = 840, H = 300;
+                    const innerW = W - padL - padR, innerH = H - padT - padB;
+                    const vals = longProfile.smooth;
+                    const maxY = Math.max(1, ...vals);
+                    const xScale = (i: number) => padL + (i / Math.max(1, vals.length - 1)) * innerW;
+                    const yScale = (v: number) => padT + innerH - (v / maxY) * innerH;
+
+                    const geneStartPos = geneRow.start - longProfile.ws;
+                    const geneEndPos = geneRow.end - longProfile.ws;
+
+                    const w = Math.max(1, innerW / Math.max(1, vals.length));
+                    const bars: JSX.Element[] = [];
+                    for (let i = 0; i < vals.length; i++) {
+                      const x = xScale(i), y = yScale(vals[i]);
+                      bars.push(<rect key={i} x={x} y={y} width={w} height={padT + innerH - y} fill="#e5e7eb" />);
+                    }
+                    const dots = longProfile.peaks.map((i, k) => <circle key={k} cx={xScale(i)} cy={yScale(vals[i])} r={3} fill="#ef4444" />);
+
+                    return (
+                      <>
+                        <rect x={0} y={0} width={W} height={H} fill="#ffffff" />
+                        {/* flank shading */}
+                        <rect x={padL} y={padT} width={xScale(geneStartPos) - padL} height={innerH} fill="#000000" opacity="0.04" />
+                        <rect x={xScale(geneEndPos)} y={padT} width={padL + innerW - xScale(geneEndPos)} height={innerH} fill="#000000" opacity="0.04" />
+                        {/* bars + dots */}
                         {bars}
-                        {profileOverlay}
                         {dots}
-                        <text x={padL + W / 2} y={profilePadT + profileHeight - 12} textAnchor="middle" fontSize={11} fill="#6b7280">Window (5′ → 3′): flank — gene — flank</text>
-                        <text transform={`translate(18,${profilePadT + 28 + profileInnerH / 2}) rotate(-90)`} fontSize={11} fill="#6b7280" textAnchor="middle">Smoothed ligation events</text>
+                        {/* gene boundary lines */}
+                        <line x1={xScale(geneStartPos)} y1={padT} x2={xScale(geneStartPos)} y2={padT + innerH} stroke="#111827" strokeWidth={1} />
+                        <line x1={xScale(geneEndPos)} y1={padT} x2={xScale(geneEndPos)} y2={padT + innerH} stroke="#111827" strokeWidth={1} />
+                        {/* axis labels */}
+                        <text x={padL + innerW / 2} y={H - 12} textAnchor="middle" fontSize={11} fill="#6b7280">Window (5′ → 3′): flank — gene — flank</text>
+                        <text x={18} y={padT + innerH / 2} fontSize={11} fill="#6b7280" transform={`rotate(-90 18 ${padT + innerH / 2})`} textAnchor="middle">Smoothed ligation events</text>
                       </>
                     );
                   })()}

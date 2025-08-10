@@ -495,6 +495,8 @@ export default function FoldMapPage() {
           </section>
         </div>
 
+// ... (previous code unchanged above)
+
         {/* Plots */}
         <div className="col-span-12 lg:col-span-9 space-y-4">
           {/* Combined figure: both map and profile, shared x-axis */}
@@ -516,32 +518,32 @@ export default function FoldMapPage() {
                     // MAP
                     const padL = sharedXAxis.padL, padR = sharedXAxis.padR, padT = 44, padB = 44;
                     const W = sharedXAxis.W, H = 680 - padT - padB;
-                    const mat = dispMat as number[][];
-                    const cw = W / matBundle!.nBins, ch = H / matBundle!.nBins;
-                    const vals = mat.flat().filter((v) => v > 0);
-                    const vmax = vals.length ? percentile(vals, 95) : 1;
-                    const color = (v: number) => {
-                      const t = Math.min(1, v / (vmax || 1));
+                    const mapMat = dispMat as number[][];
+                    const mapVals = mapMat.flat().filter((v) => v > 0);
+                    const mapVmax = mapVals.length ? percentile(mapVals, 95) : 1;
+                    const mapColor = (v: number) => {
+                      const t = Math.min(1, v / (mapVmax || 1));
                       const r = 255, g = Math.round(255 * (1 - t)), b = Math.round(255 * (1 - t));
                       return `rgb(${r},${g},${b})`;
                     };
                     const mapY0 = padT;
+                    const mapCw = W / matBundle!.nBins, mapCh = H / matBundle!.nBins;
                     // gene region + flanks
                     const bStart = Math.floor((geneRow.start - matBundle!.ws) / matBundle!.bin);
                     const bEndEdge = Math.floor((geneRow.end - matBundle!.ws) / matBundle!.bin) + 1;
-                    const leftW = bStart * cw, rightX = padL + bEndEdge * cw, rightW = W - bEndEdge * cw;
+                    const leftW = bStart * mapCw, rightX = padL + bEndEdge * mapCw, rightW = W - bEndEdge * mapCw;
                     const mapCells: JSX.Element[] = [];
                     for (let i = 0; i < matBundle!.nBins; i++) {
                       for (let j = 0; j < matBundle!.nBins; j++) {
-                        const v = mat[i][j];
+                        const v = mapMat[i][j];
                         mapCells.push(
                           <rect
                             key={`${i}-${j}`}
-                            x={padL + j * cw}
-                            y={mapY0 + i * ch}
-                            width={cw}
-                            height={ch}
-                            fill={v > 0 ? color(v) : "#ffffff"}
+                            x={padL + j * mapCw}
+                            y={mapY0 + i * mapCh}
+                            width={mapCw}
+                            height={mapCh}
+                            fill={v > 0 ? mapColor(v) : "#ffffff"}
                           />
                         );
                       }
@@ -551,28 +553,28 @@ export default function FoldMapPage() {
                       <>
                         <rect x={padL} y={mapY0} width={leftW} height={H} fill="#000000" opacity="0.04" />
                         <rect x={rightX} y={mapY0} width={rightW} height={H} fill="#000000" opacity="0.04" />
-                        <line x1={padL + bStart * cw} y1={mapY0} x2={padL + bStart * cw} y2={mapY0 + H} stroke="#111827" strokeWidth={1} />
-                        <line x1={padL + bEndEdge * cw} y1={mapY0} x2={padL + bEndEdge * cw} y2={mapY0 + H} stroke="#111827" strokeWidth={1} />
-                        <line x1={padL} y1={mapY0 + bStart * ch} x2={padL + W} y2={mapY0 + bStart * ch} stroke="#111827" strokeWidth={1} />
-                        <line x1={padL} y1={mapY0 + bEndEdge * ch} x2={padL + W} y2={mapY0 + bEndEdge * ch} stroke="#111827" strokeWidth={1} />
+                        <line x1={padL + bStart * mapCw} y1={mapY0} x2={padL + bStart * mapCw} y2={mapY0 + H} stroke="#111827" strokeWidth={1} />
+                        <line x1={padL + bEndEdge * mapCw} y1={mapY0} x2={padL + bEndEdge * mapCw} y2={mapY0 + H} stroke="#111827" strokeWidth={1} />
+                        <line x1={padL} y1={mapY0 + bStart * mapCh} x2={padL + W} y2={mapY0 + bStart * mapCh} stroke="#111827" strokeWidth={1} />
+                        <line x1={padL} y1={mapY0 + bEndEdge * mapCh} x2={padL + W} y2={mapY0 + bEndEdge * mapCh} stroke="#111827" strokeWidth={1} />
                       </>
                     );
 
                     // PROFILE
                     const profilePadT = padT + H + 30, profilePadB = 44, profileHeight = 300, profileInnerH = profileHeight - 28 - profilePadB;
-                    const vals = longProfile.smooth;
-                    const maxY = Math.max(1, ...vals);
-                    const xScale = (i: number) => padL + (i / Math.max(1, vals.length - 1)) * W;
+                    const profileVals = longProfile.smooth;
+                    const maxY = Math.max(1, ...profileVals);
+                    const xScale = (i: number) => padL + (i / Math.max(1, profileVals.length - 1)) * W;
                     const yScale = (v: number) => profilePadT + 28 + profileInnerH - (v / maxY) * profileInnerH;
                     const geneStartPos = geneRow.start - longProfile.ws;
                     const geneEndPos = geneRow.end - longProfile.ws;
-                    const w = Math.max(1, W / Math.max(1, vals.length));
+                    const w = Math.max(1, W / Math.max(1, profileVals.length));
                     const bars: JSX.Element[] = [];
-                    for (let i = 0; i < vals.length; i++) {
-                      const x = xScale(i), y = yScale(vals[i]);
+                    for (let i = 0; i < profileVals.length; i++) {
+                      const x = xScale(i), y = yScale(profileVals[i]);
                       bars.push(<rect key={i} x={x} y={y} width={w} height={profilePadT + 28 + profileInnerH - y} fill="#e5e7eb" />);
                     }
-                    const dots = longProfile.peaks.map((i, k) => <circle key={k} cx={xScale(i)} cy={yScale(vals[i])} r={3} fill="#ef4444" />);
+                    const dots = longProfile.peaks.map((i, k) => <circle key={k} cx={xScale(i)} cy={yScale(profileVals[i])} r={3} fill="#ef4444" />);
                     const profileOverlay = (
                       <>
                         <rect x={padL} y={profilePadT + 28} width={xScale(geneStartPos) - padL} height={profileInnerH} fill="#000000" opacity="0.04" />

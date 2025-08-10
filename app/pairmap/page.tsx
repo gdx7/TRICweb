@@ -219,7 +219,7 @@ export default function PairMapPage() {
           <span className="text-xs text-slate-600 w-14 text-right">{flankX} nt</span>
         </div>
 
-        {/* NEW: BIN + VMAX */}
+        {/* BIN + VMAX */}
         <div className="flex items-center gap-2">
           <label className="text-sm text-slate-700 w-20">BIN</label>
           <input type="range" min={5} max={50} step={5} value={binSize}
@@ -262,18 +262,21 @@ export default function PairMapPage() {
             const cellW = cw / m.bins_x;
             const cellH = ch / m.bins_y;
 
+            // helper to place Y (invert axis: 0 bin appears at bottom)
+            const yPix = (bin: number) => 10 + (m.bins_y - 1 - bin) * cellH;
+
             return (
               <g key={i} transform={`translate(${left},${top})`}>
                 {/* frame */}
                 <rect x={leftPad} y={10} width={cw} height={ch} fill="#fff" stroke="#222" strokeWidth={1} />
 
-                {/* cells with per-panel palette + vmax */}
+                {/* cells with per-panel palette + vmax (Y inverted) */}
                 {m.mat.map((row, yy) =>
                   row.map((v, xx) => (
                     <rect
                       key={`${yy}-${xx}`}
                       x={leftPad + xx * cellW}
-                      y={10 + yy * cellH}
+                      y={yPix(yy)}
                       width={cellW}
                       height={cellH}
                       fill={colorFrom(v, vmax, m.paletteIndex)}
@@ -296,7 +299,7 @@ export default function PairMapPage() {
                   ));
                 })()}
 
-                {/* Y ticks: -flankY, start, end, +flankY */}
+                {/* Y ticks: -flankY, start, end, +flankY  (positions inverted) */}
                 {(() => {
                   const gy_len = m.y_len_bins;
                   const gy_s = Math.floor(flankY / binSize);
@@ -304,14 +307,14 @@ export default function PairMapPage() {
                   const yticks = [0, gy_s, gy_e, m.bins_y - 1];
                   const ylbls = [`-${flankY}`, "start", "end", `+${flankY}`];
                   return yticks.map((b, j) => (
-                    <g key={j} transform={`translate(${leftPad},${10 + (b / m.bins_y) * ch})`}>
+                    <g key={j} transform={`translate(${leftPad},${yPix(b)})`}>
                       <line x1={-6} y1={0} x2={0} y2={0} stroke="#222" />
                       <text x={-10} y={3} textAnchor="end">{ylbls[j]}</text>
                     </g>
                   ));
                 })()}
 
-                {/* axis labels (moved farther to avoid overlap) */}
+                {/* axis labels */}
                 <text x={leftPad + cw / 2} y={ch + 38} textAnchor="middle">{m.label} (5′→3′)</text>
                 <text transform={`translate(${leftPad - 34},${10 + ch / 2}) rotate(-90)`} textAnchor="middle">
                   {primaryRNA} (5′→3′)

@@ -16,8 +16,8 @@ type Annotation = {
   chromosome?: string;
 };
 
-/* -------------- Helpers (only new bit = cf) -------------- */
-const cf = (s: string) => String(s || "").trim().toLowerCase(); // <- case-insensitive key
+/* ---------------- Helpers ---------------- */
+const cf = (s: string) => String(s || "").trim().toLowerCase(); // case-insensitive key
 
 function exportSVG(svgId: string, name: string) {
   const el = document.getElementById(svgId) as SVGSVGElement | null;
@@ -54,7 +54,7 @@ function parseAnnoCSV(csv: string): Annotation[] {
     }));
 }
 
-// accepts .bed (chrom, pos1, pos2) or 2-column CSV
+// accepts .bed (chrom, pos1, pos2) or simple 2-col CSV
 async function parseContacts(file: File): Promise<Array<[number, number]>> {
   const txt = await file.text();
   const lines = txt.split(/\r?\n/).filter(Boolean);
@@ -75,16 +75,15 @@ export default function PairMapPage() {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [contacts, setContacts] = useState<Array<[number, number]>>([]);
 
-  // Inputs (unchanged UI, now case-insensitive under the hood)
+  // Inputs (case-insensitive under the hood; display original casing)
   const [primaryRNA, setPrimaryRNA] = useState("gcvB");
   const [secondaryList, setSecondaryList] = useState("cpxQ, sroC, arrS");
 
-  // Sliders (as before)
-  const [flankY, setFlankY] = useState(100); // nt each side on Y axis RNA
-  const [flankX, setFlankX] = useState(100); // nt each side on X axis RNAs
-
-  const BIN = 10;   // fixed binning (10 nt)
-  const VMAX = 10;  // fixed color scale
+  // Sliders
+  const [flankY, setFlankY] = useState(300); // nt each side on Y RNA
+  const [flankX, setFlankX] = useState(300); // nt each side on X RNAs
+  const [binSize, setBinSize] = useState(10); // nt/bin
+  const [vmax, setVmax] = useState(10);       // color scale max
 
   // case-insensitive annotation index
   const annoByName = useMemo(() => {
@@ -96,13 +95,13 @@ export default function PairMapPage() {
   const primaryKey = cf(primaryRNA);
   const yAnn = annoByName.get(primaryKey);
 
-  const xGenes = useMemo(
-    () => secondaryList.split(/[, \s]+/).map(cf).filter(Boolean),
+  const xInputsRaw = useMemo(
+    () => secondaryList.split(/[, \s]+/).map(s => s.trim()).filter(Boolean),
     [secondaryList]
   );
-  const xAnns = xGenes
-    .map((g) => ({ gene: g, ann: annoByName.get(g) }))
-    .filter((d) => d.ann) as { gene: string; ann: Annotation }[];
+  const xAnns = xInputsRaw
+    .map((label) => ({ label, key: cf(label), ann: annoByName.get(cf(label)) }))
+    .filter((d) => d.ann) as { label: string; key: string; ann: Annotation }[];
 
   async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
@@ -119,18 +118,18 @@ export default function PairMapPage() {
     const wy_s = Math.max(1, yAnn.start - flankY);
     const wy_e = yAnn.end + flankY;
     const len_y = wy_e - wy_s + 1;
-    const bins_y = Math.ceil(len_y / BIN);
+    const bins_y = Math.ceil(len_y / binSize);
 
     function toBin(coord: number, ws: number, we: number, strand?: string) {
       const plus = strand !== "-";
-      return plus ? Math.floor((coord - ws) / BIN) : Math.floor((we - coord) / BIN);
+      return plus ? Math.floor((coord - ws) / binSize) : Math.floor((we - coord) / binSize);
     }
 
-    return xAnns.map(({ gene, ann }) => {
+    return xAnns.map(({ label, ann }, i) => {
       const wx_s = Math.max(1, ann.start - flankX);
       const wx_e = ann.end + flankX;
       const len_x = wx_e - wx_s + 1;
-      const bins_x = Math.ceil(len_x / BIN);
+      const bins_x = Math.ceil(len_x / binSize);
 
       const mat = Array.from({ length: bins_y }, () => Array(bins_x).fill(0));
       for (const [c1, c2] of contacts) {
@@ -144,23 +143,39 @@ export default function PairMapPage() {
       }
 
       return {
-        gene,
+        label,
         mat,
         bins_x, bins_y,
-        // for ticks
-        y_len_bins: Math.floor((yAnn.end - yAnn.start) / BIN),
-        x_len_bins: Math.floor((ann.end - ann.start) / BIN),
+        // ticks
+        y_len_bins: Math.floor((yAnn.end - yAnn.start) / binSize),
+        x_len_bins: Math.floor((ann.end - ann.start) / binSize),
+        paletteIndex: i % 6,
       };
     });
-  }, [contacts, xAnns, yAnn, flankX, flankY]);
+  }, [contacts, xAnns, yAnn, flankX, flankY, binSize]);
 
-  // Layout
-  const panelW = 340, panelH = 280, pad = 20;
-  const W = Math.max(panelW * Math.max(1, mats.length) + pad * 2, 720);
-  const H = panelH + 110;
+  // Layout (more padding to avoid label overlap)
+  const leftPad = 54;
+  const bottomPad = 56;
+  const panelW = 360, panelH = 300, pad = 20;
+  const W = Math.max(panelW * Math.max(1, mats.length) + pad * 2, 760);
+  const H = panelH + 120;
+
+  // Simple multi-palette function
+  function colorFrom(val: number, vmax: number, paletteIndex: number) {
+    const t = Math.max(0, Math.min(1, val / Math.max(1, vmax)));
+    const hues = [0, 120, 220, 30, 280, 0]; // red, green, blue, orange, purple, grey
+    const hue = hues[paletteIndex]!;
+    if (paletteIndex === 5) {
+      // greys
+      const g = Math.round(230 - t * 200);
+      return `rgb(${g},${g},${g})`;
+    }
+    return `hsla(${hue}, 75%, 50%, ${Math.pow(t, 0.85)})`;
+  }
 
   return (
-    <div className="mx-auto max-w-[1400px] p-4">
+    <div className="mx-auto max-w-[1500px] p-4">
       <div className="flex items-center justify-between mb-3">
         <h1 className="text-xl font-semibold">pairMAP</h1>
         <button
@@ -184,34 +199,45 @@ export default function PairMapPage() {
         <div>
           <div className="text-sm text-slate-700 mb-1">Secondary RNAs (comma/space, case-insensitive)</div>
           <input
-            className="border rounded px-3 py-2 w-[380px]"
+            className="border rounded px-3 py-2 w-[420px]"
             value={secondaryList}
             onChange={(e) => setSecondaryList(e.target.value)}
           />
         </div>
 
-        {/* Sliders preserved */}
+        {/* Flank sliders */}
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-700 w-24">Flank Y</label>
+          <label className="text-sm text-slate-700 w-20">Flank Y</label>
           <input type="range" min={0} max={1000} step={10} value={flankY}
                  onChange={(e)=>setFlankY(Number(e.target.value))}/>
-          <span className="text-xs text-slate-600 w-12 text-right">{flankY} nt</span>
+          <span className="text-xs text-slate-600 w-14 text-right">{flankY} nt</span>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-700 w-24">Flank X</label>
+          <label className="text-sm text-slate-700 w-20">Flank X</label>
           <input type="range" min={0} max={1000} step={10} value={flankX}
                  onChange={(e)=>setFlankX(Number(e.target.value))}/>
-          <span className="text-xs text-slate-600 w-12 text-right">{flankX} nt</span>
+          <span className="text-xs text-slate-600 w-14 text-right">{flankX} nt</span>
+        </div>
+
+        {/* NEW: BIN + VMAX */}
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-slate-700 w-20">BIN</label>
+          <input type="range" min={5} max={50} step={5} value={binSize}
+                 onChange={(e)=>setBinSize(Number(e.target.value))}/>
+          <span className="text-xs text-slate-600 w-14 text-right">{binSize} nt/bin</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-slate-700 w-20">VMAX</label>
+          <input type="range" min={1} max={50} step={1} value={vmax}
+                 onChange={(e)=>setVmax(Number(e.target.value))}/>
+          <span className="text-xs text-slate-600 w-10 text-right">{vmax}</span>
         </div>
 
         <div className="flex-1" />
         <div className="flex gap-6">
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Annotations CSV</div>
-            <input type="file" accept=".csv" onChange={async (e)=>{
-              const f=e.target.files?.[0]; if (!f) return;
-              setAnnotations(parseAnnoCSV(await f.text()));
-            }}/>
+            <input type="file" accept=".csv" onChange={onAnnoFile}/>
           </label>
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Contacts (.bed or .csv)</div>
@@ -228,47 +254,42 @@ export default function PairMapPage() {
           </defs>
 
           {mats.map((m, i) => {
-            const left = pad + i * panelW;
-            const top = 30;
+            const left = 10 + i * panelW;
+            const top = 28;
 
-            const cw = panelW - 60;
-            const ch = panelH - 60;
+            const cw = panelW - (leftPad + 30);     // inner width
+            const ch = panelH - (10 + bottomPad);   // inner height
             const cellW = cw / m.bins_x;
             const cellH = ch / m.bins_y;
 
             return (
               <g key={i} transform={`translate(${left},${top})`}>
                 {/* frame */}
-                <rect x={30} y={10} width={cw} height={ch} fill="#fff" stroke="#222" strokeWidth={1} />
+                <rect x={leftPad} y={10} width={cw} height={ch} fill="#fff" stroke="#222" strokeWidth={1} />
 
-                {/* cells (fixed VMAX) */}
+                {/* cells with per-panel palette + vmax */}
                 {m.mat.map((row, yy) =>
-                  row.map((v, xx) => {
-                    const val = Math.max(0, Math.min(VMAX, v));
-                    const t = val / VMAX;
-                    const col = `rgba(37,99,235,${t})`; // Blues
-                    return (
-                      <rect
-                        key={`${yy}-${xx}`}
-                        x={30 + xx * cellW}
-                        y={10 + yy * cellH}
-                        width={cellW}
-                        height={cellH}
-                        fill={col}
-                      />
-                    );
-                  })
+                  row.map((v, xx) => (
+                    <rect
+                      key={`${yy}-${xx}`}
+                      x={leftPad + xx * cellW}
+                      y={10 + yy * cellH}
+                      width={cellW}
+                      height={cellH}
+                      fill={colorFrom(v, vmax, m.paletteIndex)}
+                    />
+                  ))
                 )}
 
                 {/* X ticks: -flankX, start, end, +flankX */}
                 {(() => {
                   const gx_len = m.x_len_bins;
-                  const gx_s = flankX / BIN;
+                  const gx_s = Math.floor(flankX / binSize);
                   const gx_e = gx_s + gx_len - 1;
                   const xticks = [0, gx_s, gx_e, m.bins_x - 1];
                   const xlbls = [`-${flankX}`, "start", "end", `+${flankX}`];
                   return xticks.map((b, j) => (
-                    <g key={j} transform={`translate(${30 + (b / m.bins_x) * cw},${10 + ch})`}>
+                    <g key={j} transform={`translate(${leftPad + (b / m.bins_x) * cw},${10 + ch})`}>
                       <line x1={0} y1={0} x2={0} y2={6} stroke="#222" />
                       <text x={0} y={18} textAnchor="middle">{xlbls[j]}</text>
                     </g>
@@ -278,22 +299,22 @@ export default function PairMapPage() {
                 {/* Y ticks: -flankY, start, end, +flankY */}
                 {(() => {
                   const gy_len = m.y_len_bins;
-                  const gy_s = flankY / BIN;
+                  const gy_s = Math.floor(flankY / binSize);
                   const gy_e = gy_s + gy_len - 1;
                   const yticks = [0, gy_s, gy_e, m.bins_y - 1];
                   const ylbls = [`-${flankY}`, "start", "end", `+${flankY}`];
                   return yticks.map((b, j) => (
-                    <g key={j} transform={`translate(${30},${10 + (b / m.bins_y) * ch})`}>
+                    <g key={j} transform={`translate(${leftPad},${10 + (b / m.bins_y) * ch})`}>
                       <line x1={-6} y1={0} x2={0} y2={0} stroke="#222" />
-                      <text x={-9} y={3} textAnchor="end">{ylbls[j]}</text>
+                      <text x={-10} y={3} textAnchor="end">{ylbls[j]}</text>
                     </g>
                   ));
                 })()}
 
-                {/* axis labels */}
-                <text x={30 + cw / 2} y={ch + 36} textAnchor="middle">{m.gene} (5′→3′)</text>
-                <text transform={`translate(10,${10 + ch / 2}) rotate(-90)`} textAnchor="middle">
-                  {cf(primaryRNA)} (5′→3′)
+                {/* axis labels (moved farther to avoid overlap) */}
+                <text x={leftPad + cw / 2} y={ch + 38} textAnchor="middle">{m.label} (5′→3′)</text>
+                <text transform={`translate(${leftPad - 34},${10 + ch / 2}) rotate(-90)`} textAnchor="middle">
+                  {primaryRNA} (5′→3′)
                 </text>
               </g>
             );

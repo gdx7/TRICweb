@@ -57,10 +57,12 @@ export default function Home() {
           Click a tool to begin:
         </p>
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-3">
+        {/* changed grid: 2 cols on small, 4 on md+ */}
+        <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
           <ToolCard title="globalMAP" href="/global" desc="Gene-centric global interaction map with clickable partners." />
           <ToolCard title="csMAP" href="/csmap" desc="Collapsed multi-gene profiles and totals (local peaks)." />
           <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA multi-panel heatmaps from raw chimeras." />
+          <ToolCard title="foldMAP" href="/foldmap" desc="Intra-RNA self-contact map + long-range profile." />
         </div>
       </section>
     </div>

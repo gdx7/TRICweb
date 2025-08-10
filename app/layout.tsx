@@ -7,7 +7,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
   title: "TRIC-seq Interactome Explorer",
-  description: "Explore E. coli RNA–RNA interactomes: globalMAP, csMAP, pairMAP",
+  description: "Explore RNA–RNA interactomes: globalMAP, csMAP, pairMAP",
   icons: { icon: "/drna-logo.png" }, // optional favicon
 };
 

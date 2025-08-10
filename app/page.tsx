@@ -53,8 +53,7 @@ export default function Home() {
           TRIC-seq Explorer
         </h1>
         <p className="mt-4 text-lg text-slate-600 max-w-3xl">
-          Explore global RNA–RNA interactions in bacteria
-          Click a tool to begin:
+          Explore global RNA–RNA interactions in bacteria:
         </p>
 
         {/* changed grid: 2 cols on small, 4 on md+ */}

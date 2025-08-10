@@ -291,23 +291,28 @@ export default function FoldMapPage() {
     const bStart = Math.floor((geneRow.start - matBundle.ws) / matBundle.bin);
     const bEndEdge = Math.floor((geneRow.end - matBundle.ws) / matBundle.bin) + 1;
 
+    // Reverse y-axis: flip the rows of the matrix for SVG
     let rects = "";
     for (let i = 0; i < matBundle.nBins; i++) {
       for (let j = 0; j < matBundle.nBins; j++) {
         const v = (mat as number[][])[i][j];
-        rects += `<rect x="${x0 + j * cw}" y="${y0 + i * ch}" width="${cw}" height="${ch}" fill="${v > 0 ? color(v) : "#ffffff"}"/>`;
+        // FLIP Y: draw row nBins-1-i instead of i
+        rects += `<rect x="${x0 + j * cw}" y="${y0 + (matBundle.nBins - 1 - i) * ch}" width="${cw}" height="${ch}" fill="${v > 0 ? color(v) : "#ffffff"}"/>`;
       }
     }
 
     // overlays for flanks + gene region lines
     const lfW = bStart * cw, rfX = x0 + bEndEdge * cw, rfW = W - bEndEdge * cw;
+    // FLIP Y for overlays/lines
+    const bStartY = y0 + (matBundle.nBins - bStart) * ch;
+    const bEndEdgeY = y0 + (matBundle.nBins - bEndEdge) * ch;
     const overlay = `
       <rect x="${x0}" y="${y0}" width="${lfW}" height="${H}" fill="#000000" opacity="0.04"/>
       <rect x="${rfX}" y="${y0}" width="${rfW}" height="${H}" fill="#000000" opacity="0.04"/>
       <line x1="${x0 + bStart * cw}" y1="${y0}" x2="${x0 + bStart * cw}" y2="${y0 + H}" stroke="#111827" stroke-width="1"/>
       <line x1="${x0 + bEndEdge * cw}" y1="${y0}" x2="${x0 + bEndEdge * cw}" y2="${y0 + H}" stroke="#111827" stroke-width="1"/>
-      <line x1="${x0}" y1="${y0 + bStart * ch}" x2="${x0 + W}" y2="${y0 + bStart * ch}" stroke="#111827" stroke-width="1"/>
-      <line x1="${x0}" y1="${y0 + bEndEdge * ch}" x2="${x0 + W}" y2="${y0 + bEndEdge * ch}" stroke="#111827" stroke-width="1"/>
+      <line x1="${x0}" y1="${bStartY}" x2="${x0 + W}" y2="${bStartY}" stroke="#111827" stroke-width="1"/>
+      <line x1="${x0}" y1="${bEndEdgeY}" x2="${x0 + W}" y2="${bEndEdgeY}" stroke="#111827" stroke-width="1"/>
     `;
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
@@ -316,7 +321,7 @@ export default function FoldMapPage() {
       ${rects}
       ${overlay}
       <text x="${x0 + W / 2}" y="${height - 10}" text-anchor="middle" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
-      <text transform="translate(16,${y0 + H / 2}) rotate(-90)" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
+      <text transform="translate(16,${y0 + H / 2}) rotate(-90)" font-size="11" fill="#6b7280">3′ → 5′ (bins)</text>
     </svg>`;
     downloadText(`${geneRow.gene_name}_foldMAP_${norm}.svg`, svg);
   }
@@ -499,12 +504,22 @@ export default function FoldMapPage() {
                       return `rgb(${r},${g},${b})`;
                     };
 
-                    // cells
+                    // Reverse y-axis: display rows from bottom to top
                     const cells: JSX.Element[] = [];
                     for (let i = 0; i < matBundle!.nBins; i++) {
                       for (let j = 0; j < matBundle!.nBins; j++) {
                         const v = mat[i][j];
-                        cells.push(<rect key={`${i}-${j}`} x={x0 + j * cw} y={y0 + i * ch} width={cw} height={ch} fill={v > 0 ? color(v) : "#ffffff"} />);
+                        // FLIP Y: draw row nBins-1-i instead of i
+                        cells.push(
+                          <rect
+                            key={`${i}-${j}`}
+                            x={x0 + j * cw}
+                            y={y0 + (matBundle!.nBins - 1 - i) * ch}
+                            width={cw}
+                            height={ch}
+                            fill={v > 0 ? color(v) : "#ffffff"}
+                          />
+                        );
                       }
                     }
 
@@ -512,6 +527,10 @@ export default function FoldMapPage() {
                     const bStart = Math.floor((geneRow.start - matBundle!.ws) / matBundle!.bin);
                     const bEndEdge = Math.floor((geneRow.end - matBundle!.ws) / matBundle!.bin) + 1;
                     const leftW = bStart * cw, rightX = x0 + bEndEdge * cw, rightW = W - bEndEdge * cw;
+
+                    // FLIP Y for overlays/lines
+                    const bStartY = y0 + (matBundle!.nBins - bStart) * ch;
+                    const bEndEdgeY = y0 + (matBundle!.nBins - bEndEdge) * ch;
 
                     return (
                       <>
@@ -523,11 +542,11 @@ export default function FoldMapPage() {
                         {/* boundaries */}
                         <line x1={x0 + bStart * cw} y1={y0} x2={x0 + bStart * cw} y2={y0 + H} stroke="#111827" strokeWidth={1} />
                         <line x1={x0 + bEndEdge * cw} y1={y0} x2={x0 + bEndEdge * cw} y2={y0 + H} stroke="#111827" strokeWidth={1} />
-                        <line x1={x0} y1={y0 + bStart * ch} x2={x0 + W} y2={y0 + bStart * ch} stroke="#111827" strokeWidth={1} />
-                        <line x1={x0} y1={y0 + bEndEdge * ch} x2={x0 + W} y2={y0 + bEndEdge * ch} stroke="#111827" strokeWidth={1} />
+                        <line x1={x0} y1={bStartY} x2={x0 + W} y2={bStartY} stroke="#111827" strokeWidth={1} />
+                        <line x1={x0} y1={bEndEdgeY} x2={x0 + W} y2={bEndEdgeY} stroke="#111827" strokeWidth={1} />
                         {/* labels */}
                         <text x={x0 + W / 2} y={680 - 12} textAnchor="middle" fontSize={11} fill="#6b7280">5′ → 3′ (bins)</text>
-                        <text x={18} y={y0 + H / 2} fontSize={11} fill="#6b7280" transform={`rotate(-90 18 ${y0 + H / 2})`} textAnchor="middle">5′ → 3′ (bins)</text>
+                        <text x={18} y={y0 + H / 2} fontSize={11} fill="#6b7280" transform={`rotate(-90 18 ${y0 + H / 2})`} textAnchor="middle">3′ → 5′ (bins)</text>
                       </>
                     );
                   })()}

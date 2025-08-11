@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-4">
             <Link href="/" className="flex items-center gap-2 hover:opacity-80">
               <img src="/tric-logo.png" alt="TRIC-seq logo" className="h-7 w-7" />
-              <span className="text-lg font-semibold">TRIC-seq Interactome Explorer</span>
+              <span className="text-lg font-semibold">TRIC-seq interactome explorer</span>
             </Link>
             <nav className="flex items-center gap-2">
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/global">globalMAP</Link>

@@ -69,10 +69,10 @@ export default function Home() {
 
         {/* tools grid */}
         <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction map with clickable partners." />
+          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction map with clickable targets." />
           <ToolCard title="csMAP" href="/csmap" desc="Condensed multi-RNA comparative profiles." />
-          <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps forl binding sites." />
-          <ToolCard title="foldMAP" href="/foldmap" desc="Structural maps for RNA." />
+          <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps for binding sites." />
+          <ToolCard title="foldMAP" href="/foldmap" desc="Structural contact map for RNA." />
         </div>
       </section>
     </div>

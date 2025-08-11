@@ -61,10 +61,10 @@ export default function Home() {
         </p>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction map with clickable partners." />
-          <ToolCard title="csMAP" href="/csmap" desc="Collapsed multi-RNA comparative target profiles." />
-          <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps reveal binding sites." />
-          <ToolCard title="foldMAP" href="/foldmap" desc="Structural maps for RNA." />
+          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction maps" />
+          <ToolCard title="csMAP" href="/csmap" desc="Multi-RNA comparative target profiles" />
+          <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps for binding sites" />
+          <ToolCard title="foldMAP" href="/foldmap" desc="Structural contact maps of RNAs" />
         </div>
       </section>
     </div>

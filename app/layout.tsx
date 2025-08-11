@@ -33,14 +33,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         <main>{children}</main>
 
-        {/* Lab logo + one-line copyright (replaces the old line) */}
+        {/* Lab logo + copyright */}
         <footer className="mt-12 border-t bg-white">
           <div className="mx-auto max-w-7xl px-4 py-10 flex flex-col items-center gap-3">
             <a href="https://www.drna.nl" target="_blank" rel="noreferrer" className="opacity-90 hover:opacity-100">
               <img src="/drna-logo.png" alt="dRNA Lab logo" className="h-14 w-auto" />
             </a>
             <div className="text-sm text-slate-500">
-              © 2025 <a className="underline hover:text-slate-700" href="https://www.drna.nl" target="_blank" rel="noreferrer">www.drna.nl</a> — All rights reserved
+              © 2025 <a className="italic hover:text-slate-700" href="https://www.drna.nl" target="_blank" rel="noreferrer">www.drna.nl</a> — All rights reserved
             </div>
           </div>
         </footer>

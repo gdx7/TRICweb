@@ -3,6 +3,9 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import { Sora } from "next/font/google";
+
+const sora = Sora({ subsets: ["latin"] });
 
 const FEATURE_COLORS = ["#F78208","#76AAD7","#0C0C0C","#A40194","#82F778","#999999","#F12C2C","#C4C5C5"];
 
@@ -12,15 +15,9 @@ export default function Home() {
   const bubbles = useMemo<Bubble[]>(() => {
     const rand = (a: number, b: number) => a + Math.random() * (b - a);
     return Array.from({ length: 22 }).map(() => ({
-      top: rand(5, 80),           // vh
-      left: rand(5, 90),          // vw
-      size: rand(60, 220),        // px
+      top: rand(5, 80), left: rand(5, 90), size: rand(60, 220),
       color: FEATURE_COLORS[Math.floor(Math.random() * FEATURE_COLORS.length)],
-      delay: rand(-6, 6),         // s (slightly tighter)
-      dur: rand(9, 16),           // s (faster than before)
-      dx: rand(-26, 26),          // px (subtle drift)
-      dy: rand(-18, 18),          // px
-      blur: rand(2, 5),           // px (more blurry)
+      delay: rand(-6, 6), dur: rand(9, 16), dx: rand(-26, 26), dy: rand(-18, 18), blur: rand(2, 5),
     }));
   }, []);
 
@@ -49,14 +46,15 @@ export default function Home() {
       </div>
 
       <section className="relative mx-auto max-w-5xl px-6 py-20 sm:py-28">
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
-          TRIC-seq Explorer
+        <h1 className={`${sora.className} text-4xl sm:text-5xl tracking-wide font-semibold flex items-center gap-3`}>
+          <img src="/tric-logo.png" alt="TRIC-seq logo" className="h-10 w-10 rounded-sm" />
+          <span>TRIC-seq Explorer</span>
         </h1>
         <p className="mt-4 text-lg text-slate-600 max-w-3xl">
           Explore global RNA–RNA interactions in bacteria:
         </p>
 
-        {/* changed grid: 2 cols on small, 4 on md+ */}
+        {/* tools grid */}
         <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
           <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction map with clickable partners." />
           <ToolCard title="csMAP" href="/csmap" desc="Collapsed multi-RNA comparative target profiles." />

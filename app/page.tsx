@@ -33,7 +33,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="relative overflow-hidden">
+    <div className="relative min-h-screen overflow-x-hidden">
       {/* floating outline circles */}
       <div className="pointer-events-none absolute inset-0">
         {bubbles.map((b, i) => (
@@ -70,8 +70,8 @@ export default function Home() {
         {/* tools grid */}
         <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
           <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction map with clickable partners." />
-          <ToolCard title="csMAP" href="/csmap" desc="Collapsed multi-RNA comparative target profiles." />
-          <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps reveal binding sites." />
+          <ToolCard title="csMAP" href="/csmap" desc="Condensed multi-RNA comparative profiles." />
+          <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps forl binding sites." />
           <ToolCard title="foldMAP" href="/foldmap" desc="Structural maps for RNA." />
         </div>
       </section>

@@ -6,30 +6,27 @@ import { useMemo } from "react";
 
 const FEATURE_COLORS = ["#F78208","#76AAD7","#0C0C0C","#A40194","#82F778","#999999","#F12C2C","#C4C5C5"];
 
-type Bubble = {
-  top: number; left: number; size: number; color: string;
-  delay: number; dur: number; dx: number; dy: number; blur: number;
-};
+type Bubble = { top: number; left: number; size: number; color: string; delay: number; dur: number; dx: number; dy: number; blur: number; };
 
 export default function Home() {
   const bubbles = useMemo<Bubble[]>(() => {
     const rand = (a: number, b: number) => a + Math.random() * (b - a);
-    return Array.from({ length: 28 }).map(() => ({
-      top: rand(5, 80),      // vh
-      left: rand(5, 90),     // vw
-      size: rand(60, 220),   // px
+    return Array.from({ length: 30 }).map(() => ({
+      top: rand(5, 80),
+      left: rand(5, 90),
+      size: rand(60, 220),
       color: FEATURE_COLORS[Math.floor(Math.random() * FEATURE_COLORS.length)],
-      delay: rand(-6, 6),    // s
-      dur: rand(8, 13),      // s (a touch faster)
-      dx: rand(-30, 30),     // px
-      dy: rand(-22, 22),     // px
-      blur: rand(2, 6),      // px
+      delay: rand(-6, 6),
+      dur: rand(8, 13),
+      dx: rand(-30, 30),
+      dy: rand(-22, 22),
+      blur: rand(2, 6),
     }));
   }, []);
 
   return (
     <div className="relative overflow-x-hidden">
-      {/* floating outline circles (extend slightly below fold so they don’t “cut off”) */}
+      {/* floating outline circles */}
       <div className="pointer-events-none absolute inset-x-0 top-0" style={{ bottom: "-6vh" }}>
         {bubbles.map((b, i) => (
           <div
@@ -51,9 +48,9 @@ export default function Home() {
         ))}
       </div>
 
-      {/* HERO — reduced ~20% so there’s no scroll */}
-      <section className="relative mx-auto max-w-5xl px-6 pt-16 pb-6 sm:pt-20 sm:pb-8 min-h-[80svh]">
-        {/* Title row: larger tric logo, smaller title */}
+      {/* HERO — previously 80svh, now ~65svh (15% less) */}
+      <section className="relative mx-auto max-w-5xl px-6 pt-14 pb-2 sm:pt-18 sm:pb-3 min-h-[65svh]">
+        {/* Title row: bigger logo, smaller title */}
         <div className="flex items-center gap-3">
           <img src="/tric-logo.png" alt="TRIC-seq logo" className="h-16 w-16 sm:h-20 sm:w-20" />
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">TRIC-seq</h1>
@@ -63,12 +60,11 @@ export default function Home() {
           Explore global RNA–RNA interactions in bacteria:
         </p>
 
-        {/* Tools */}
         <div className="mt-8 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction maps." />
-          <ToolCard title="csMAP" href="/csmap" desc="Multi-RNA comparative target profiles." />
-          <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps for binding sites." />
-          <ToolCard title="foldMAP" href="/foldmap" desc="Structural contact maps for RNA." />
+          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction map with clickable partners." />
+          <ToolCard title="csMAP" href="/csmap" desc="Collapsed multi-RNA comparative target profiles." />
+          <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps reveal binding sites." />
+          <ToolCard title="foldMAP" href="/foldmap" desc="Structural maps for RNA." />
         </div>
       </section>
     </div>

@@ -33,11 +33,9 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 bottom-[-8vh]">
-  {/* bubbles... */}
-</div>
+    <div className="relative min-h-screen overflow-x-hidden">
       {/* floating outline circles */}
-      <div className="pointer-events-none absolute inset-0">
+      <div className="pointer-events-none absolute inset-x-0 top-0 bottom-[-8vh]">
         {bubbles.map((b, i) => (
           <div
             key={i}

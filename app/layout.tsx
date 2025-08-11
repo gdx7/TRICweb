@@ -1,10 +1,10 @@
 // app/layout.tsx
 import "./globals.css";
 import Link from "next/link";
-import { Inter, Bebas_Neue } from "next/font/google";
+import { Inter, Sora } from "next/font/google";
 
 const inter = Inter({ subsets: ["latin"] });
-const headerFont = Bebas_Neue({ weight: "400", subsets: ["latin"] });
+const sora = Sora({ subsets: ["latin"] });
 
 export const metadata = {
   title: "TRIC-seq Interactome Explorer",
@@ -29,12 +29,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 alt="TRIC-seq logo"
                 className="h-7 w-7 rounded-sm"
               />
-              <span className={`${headerFont.className} text-2xl tracking-wide`}>
+              <span className={`${sora.className} text-2xl tracking-wide`}>
                 TRIC-seq Interactome Explorer
               </span>
             </Link>
 
-            <nav className="flex items-center gap-2">
+            <nav className={`${sora.className} flex items-center gap-2 tracking-wide`}>
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/global">globalMAP</Link>
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/csmap">csMAP</Link>
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/pairmap">pairMAP</Link>

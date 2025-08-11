@@ -57,11 +57,11 @@ export default function Home() {
         ))}
       </div>
 
-      {/* hero section: 1.5x taller */}
-      <section className="relative mx-auto max-w-5xl px-6 py-32 sm:py-44">
+      {/* hero section: reduced height by 20% */}
+      <section className="relative mx-auto max-w-5xl px-6 py-26 sm:py-35">
         <h1 className={`${sora.className} text-3xl sm:text-4xl tracking-wide font-semibold flex items-center gap-4`}>
           <img src="/tric-logo.png" alt="TRIC-seq logo" className="h-20 w-20 rounded-sm" />
-          <span>TRIC-seq</span>
+          <span>TRIC-seq <span className="text-slate-400 text-lg font-normal ml-2">2025</span></span>
         </h1>
         <p className="mt-4 text-lg text-slate-600 max-w-3xl">
           Explore global RNA–RNA interactions in bacteria:

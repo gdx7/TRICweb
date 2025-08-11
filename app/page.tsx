@@ -3,9 +3,6 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { Sora } from "next/font/google";
-
-const sora = Sora({ subsets: ["latin"] });
 
 const FEATURE_COLORS = ["#F78208","#76AAD7","#0C0C0C","#A40194","#82F778","#999999","#F12C2C","#C4C5C5"];
 

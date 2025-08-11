@@ -389,10 +389,10 @@ export default function FoldMapPage() {
             <div className="font-semibold mb-2">Data</div>
             <div className="text-xs text-gray-600">Annotation CSV</div>
             <input ref={annRef} type="file" accept=".csv" onChange={onAnnFile} />
-            <div className="text-xs text-gray-600 mt-3">Interactions (.bed / .csv) — you can select multiple</div>
+            <div className="text-xs text-gray-600 mt-3">Chimeras (.bed / .csv)</div>
             <input ref={intRef} type="file" accept=".bed,.csv" multiple onChange={onIntsFile} />
             <p className="text-[11px] text-gray-500 mt-2">
-              Annotation: headerless or headered. Interactions: two coordinate columns.
+              
             </p>
           </section>
 

@@ -1,14 +1,19 @@
 // app/layout.tsx
 import "./globals.css";
 import Link from "next/link";
-import { Inter } from "next/font/google";
+import { Inter, Bebas_Neue } from "next/font/google";
 
 const inter = Inter({ subsets: ["latin"] });
+const headerFont = Bebas_Neue({ weight: "400", subsets: ["latin"] });
 
 export const metadata = {
   title: "TRIC-seq Interactome Explorer",
   description: "Explore RNA–RNA interactomes: globalMAP, csMAP, pairMAP, foldMAP",
-  icons: { icon: "/drna-logo.png" }, // optional favicon
+  icons: {
+    icon: "/tric-logo.png",
+    shortcut: "/tric-logo.png",
+    apple: "/tric-logo.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -18,9 +23,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Global header */}
         <header className="sticky top-0 z-50 bg-white/90 backdrop-blur border-b">
           <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-4">
-            <Link href="/" className="text-lg font-semibold hover:opacity-80">
-              TRIC-seq Interactome Explorer
+            <Link href="/" className="flex items-center gap-2 hover:opacity-90">
+              <img
+                src="/tric-logo.png"
+                alt="TRIC-seq logo"
+                className="h-7 w-7 rounded-sm"
+              />
+              <span className={`${headerFont.className} text-2xl tracking-wide`}>
+                TRIC-seq Interactome Explorer
+              </span>
             </Link>
+
             <nav className="flex items-center gap-2">
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/global">globalMAP</Link>
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/csmap">csMAP</Link>

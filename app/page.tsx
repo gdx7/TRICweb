@@ -3,39 +3,34 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { Sora } from "next/font/google";
-
-const sora = Sora({ subsets: ["latin"] });
 
 const FEATURE_COLORS = ["#F78208","#76AAD7","#0C0C0C","#A40194","#82F778","#999999","#F12C2C","#C4C5C5"];
 
 type Bubble = {
   top: number; left: number; size: number; color: string;
-  delay: number; dur: number; dx: number; dy: number; blur: number; opacity: number;
+  delay: number; dur: number; dx: number; dy: number; blur: number;
 };
 
 export default function Home() {
   const bubbles = useMemo<Bubble[]>(() => {
     const rand = (a: number, b: number) => a + Math.random() * (b - a);
-    // a few more circles, blurrier, faster drift, slightly larger wander
-    return Array.from({ length: 30 }).map(() => ({
-      top: rand(5, 80),                 // vh
-      left: rand(5, 90),                // vw
-      size: rand(60, 220),              // px
+    return Array.from({ length: 28 }).map(() => ({
+      top: rand(5, 80),      // vh
+      left: rand(5, 90),     // vw
+      size: rand(60, 220),   // px
       color: FEATURE_COLORS[Math.floor(Math.random() * FEATURE_COLORS.length)],
-      delay: rand(-6, 6),               // s
-      dur: rand(6, 12),                 // s (faster)
-      dx: rand(-32, 32),                // px
-      dy: rand(-24, 24),                // px
-      blur: rand(4, 8),                 // px (more diffused)
-      opacity: rand(0.28, 0.58),        // softer outlines
+      delay: rand(-6, 6),    // s
+      dur: rand(8, 13),      // s (a touch faster)
+      dx: rand(-30, 30),     // px
+      dy: rand(-22, 22),     // px
+      blur: rand(2, 6),      // px
     }));
   }, []);
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden">
-      {/* floating outline circles */}
-      <div className="pointer-events-none absolute inset-0">
+    <div className="relative overflow-x-hidden">
+      {/* floating outline circles (extend slightly below fold so they don’t “cut off”) */}
+      <div className="pointer-events-none absolute inset-x-0 top-0" style={{ bottom: "-6vh" }}>
         {bubbles.map((b, i) => (
           <div
             key={i}
@@ -47,9 +42,8 @@ export default function Home() {
               height: b.size,
               border: `3px solid ${b.color}`,
               filter: `blur(${b.blur}px)`,
-              opacity: b.opacity,
               animation: `drift ${b.dur}s ease-in-out ${b.delay}s infinite`,
-              // @ts-ignore CSS var for keyframes
+              // @ts-ignore
               "--dx": `${b.dx}px`,
               "--dy": `${b.dy}px`,
             }}
@@ -57,22 +51,24 @@ export default function Home() {
         ))}
       </div>
 
-      {/* hero section: reduced height by 20% */}
-      <section className="relative mx-auto max-w-5xl px-6 py-26 sm:py-35">
-        <h1 className={`${sora.className} text-3xl sm:text-4xl tracking-wide font-semibold flex items-center gap-4`}>
-          <img src="/tric-logo.png" alt="TRIC-seq logo" className="h-20 w-20 rounded-sm" />
-          <span>TRIC-seq <span className="text-slate-400 text-lg font-normal ml-2">2025</span></span>
-        </h1>
+      {/* HERO — reduced ~20% so there’s no scroll */}
+      <section className="relative mx-auto max-w-5xl px-6 pt-16 pb-6 sm:pt-20 sm:pb-8 min-h-[80svh]">
+        {/* Title row: larger tric logo, smaller title */}
+        <div className="flex items-center gap-3">
+          <img src="/tric-logo.png" alt="TRIC-seq logo" className="h-16 w-16 sm:h-20 sm:w-20" />
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">TRIC-seq</h1>
+        </div>
+
         <p className="mt-4 text-lg text-slate-600 max-w-3xl">
           Explore global RNA–RNA interactions in bacteria:
         </p>
 
-        {/* tools grid */}
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction map with clickable targets." />
-          <ToolCard title="csMAP" href="/csmap" desc="Condensed multi-RNA comparative profiles." />
+        {/* Tools */}
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction maps." />
+          <ToolCard title="csMAP" href="/csmap" desc="Multi-RNA comparative target profiles." />
           <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps for binding sites." />
-          <ToolCard title="foldMAP" href="/foldmap" desc="Structural contact map for RNA." />
+          <ToolCard title="foldMAP" href="/foldmap" desc="Structural contact maps for RNA." />
         </div>
       </section>
     </div>

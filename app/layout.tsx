@@ -34,14 +34,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         <main>{children}</main>
 
-        {/* Lab logo + copyright */}
+        {/* Logos + copyright */}
         <footer className="mt-12 border-t bg-white">
-          <div className="mx-auto max-w-7xl px-4 py-10 flex flex-col items-center gap-3">
-            <a href="https://www.drna.nl" target="_blank" rel="noreferrer" className="opacity-90 hover:opacity-100">
-              <img src="/drna-logo.png" alt="dRNA Lab logo" className="h-14 w-auto" />
-            </a>
+          <div className="mx-auto max-w-7xl px-4 py-10 flex flex-col items-center gap-4">
+            <div className="flex items-center gap-6">
+              <a href="https://www.drna.nl" target="_blank" rel="noreferrer" className="opacity-90 hover:opacity-100">
+                <img src="/drna-logo.png" alt="dRNA Lab logo" className="h-14 w-auto" />
+              </a>
+              <img src="/sils-logo.png" alt="SILS logo" className="h-14 w-auto opacity-90" />
+            </div>
             <div className="text-sm text-slate-500">
-              © 2025 <a className="italic hover:text-slate-700" href="https://www.drna.nl" target="_blank" rel="noreferrer">www.drna.nl</a> — All rights reserved
+              © 2025 <a className="italic no-underline hover:text-slate-700" href="https://www.drna.nl" target="_blank" rel="noreferrer">www.drna.nl</a> — All rights reserved
             </div>
           </div>
         </footer>

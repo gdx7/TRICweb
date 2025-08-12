@@ -103,26 +103,6 @@ Required columns:
 
 ---
 
-## Project structure (key bits)
-
-```
-app/
-  page.tsx             # Home (animated bubbles + tool cards)
-  global/page.tsx      # globalMAP
-  csmap/page.tsx       # csMAP
-  pairmap/page.tsx     # pairMAP
-  foldmap/page.tsx     # foldMAP
-  layout.tsx           # Header (Sora), footer (logos + copyright)
-public/
-  tric-logo.png        # header logo + favicon
-  drna-logo.png        # footer logo (left)
-  sils-logo.png        # footer logo (right)
-styles/
-  globals.css          # Tailwind base + bubble drift keyframes
-```
-
----
-
 ## Acknowledgements
 
 Built by the **dRNA Lab** (SILS) — University of Amsterdam.  

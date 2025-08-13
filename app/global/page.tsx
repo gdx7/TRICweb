@@ -12,6 +12,7 @@ type FeatureType =
   | "rRNA"
   | "sRNA"
   | "hkRNA"
+  | "sponge"
   | string;
 
 type Annotation = {
@@ -36,7 +37,9 @@ type Pair = {
 
 type ScatterRow = {
   partner: string;
-  x: number;
+  x: number;       // midpoint for plotting
+  start: number;   // genomic start
+  end: number;     // genomic end
   y: number;       // capped OR for plotting
   rawY: number;    // true odds_ratio
   counts: number;  // deduped counts (max across orientations)
@@ -49,11 +52,11 @@ const FEATURE_COLORS: Record<FeatureType, string> = {
   sRNA: "#A40194",
   sponge: "#F12C2C",
   tRNA: "#82F778",
-  hkRNA: "#C4C5C5",
+  hkRNA: "#999999",
+  rRNA: "#999999",
   CDS: "#F78208",
   "5'UTR": "#76AAD7",
   "3'UTR": "#0C0C0C",
-  rRNA: "#999999",
 };
 const pickColor = (ft?: FeatureType) => FEATURE_COLORS[ft || "CDS"] || "#F78208";
 
@@ -108,6 +111,20 @@ function symlog(y: number, linthresh = 10, base = 10) {
   return a <= linthresh ? s * (a / linthresh) : s * (1 + Math.log(a / linthresh) / Math.log(base));
 }
 
+// helpers for display rules
+const displayGene = (name: string) => (name ? name[0].toUpperCase() + name.slice(1) : name);
+
+const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
+  if (ft === "sRNA" || ft === "ncRNA") return { label: "SRNA/ncRNA", italic: false }; // starts with uppercase per request
+  if (ft === "sponge") return { label: "Sponge", italic: false };
+  if (ft === "rRNA" || ft === "hkRNA") return { label: "rrna/hkrna", italic: true };
+  if (ft === "CDS") return { label: "cds", italic: true };
+  if (ft === "tRNA") return { label: "trna", italic: true };
+  if (ft === "5'UTR") return { label: "5'utr", italic: true };
+  if (ft === "3'UTR") return { label: "3'utr", italic: true };
+  return { label: String(ft || "").toLowerCase(), italic: true };
+};
+
 export default function Page() {
   const [data, setData] = useState(() => simulateData(500));
   const [focal, setFocal] = useState<string>("GcvB");
@@ -137,9 +154,7 @@ export default function Page() {
 
   const highlightSet = useMemo(() => {
     const toks = highlightQuery
-      .split(/[, \n\t\r]+/)
-      .map(t => t.trim())
-      .filter(Boolean);
+      .split(/[, \n\t\r]+/).map(t => t.trim()).filter(Boolean);
     return new Set(toks);
   }, [highlightQuery]);
 
@@ -160,12 +175,9 @@ export default function Page() {
       const focalAnn = geneIndex[focal];
       if (!partAnn || !focalAnn) continue;
 
-      const dist = Math.min(
-        Math.abs(partAnn.start - focalAnn.end),
-        Math.abs(partAnn.end - focalAnn.start),
-        Math.abs(partAnn.start - focalAnn.start),
-        Math.abs(partAnn.end - focalAnn.end)
-      );
+      const partMid = Math.floor((partAnn.start + partAnn.end) / 2);     // ✅ use midpoint for X
+      const focalMid = Math.floor((focalAnn.start + focalAnn.end) / 2);  // (used only for distance)
+      const dist = Math.abs(partMid - focalMid);
 
       const or = Number(e.odds_ratio) || 0;
       if (!(or > 0)) continue;
@@ -175,7 +187,6 @@ export default function Page() {
 
       const prev = acc.get(partner);
       if (prev) {
-        // ✅ fix: avoid double-counting opposite-orientation duplicates
         prev.counts = Math.max(prev.counts, counts);
         prev.rawY = Math.max(prev.rawY, or);
         prev.y = Math.min(prev.rawY, yCap);
@@ -184,7 +195,9 @@ export default function Page() {
       } else {
         acc.set(partner, {
           partner,
-          x: partAnn.start,
+          x: partMid,
+          start: partAnn.start,
+          end: partAnn.end,
           y: Math.min(or, yCap),
           rawY: or,
           counts,
@@ -200,6 +213,23 @@ export default function Page() {
       .filter(r => !excludeTypes.includes(r.type))
       .sort((a, b) => b.rawY - a.rawY);
   }, [pairs, focal, geneIndex, minCounts, minDistance, excludeTypes, yCap]);
+
+  // total chimeras for focal (deduped across orientations), independent of filters
+  const focalChimeraTotal = useMemo(() => {
+    const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
+    const seen = new Map<string, number>(); // partner -> max count
+    for (const e of edges) {
+      const ref = String(e.ref || "").trim();
+      const tgt = String(e.target || "").trim();
+      const partner = ref === focal ? tgt : ref;
+      if (!partner || partner === focal) continue;
+      const c = Number(e.counts) || 0;
+      seen.set(partner, Math.max(seen.get(partner) || 0, c));
+    }
+    let sum = 0;
+    for (const v of seen.values()) sum += v;
+    return sum;
+  }, [pairs, focal]);
 
   const genomeMax = useMemo(() => Math.max(...annotations.map(a => a.end)), [annotations]);
   const focalAnn = geneIndex[focal];
@@ -252,6 +282,16 @@ export default function Page() {
     const parsed = parseAnnoCSV(text);
     setData(prev => ({ ...prev, annotations: parsed }));
     setLoadedAnnoName(file.name);
+    if (parsed.length > 0) setFocal(parsed[0].gene_name);
+  }
+
+  // Load preset Anno_EC.csv from /public via dropdown
+  async function loadPresetAnno(path: string, label: string) {
+    const res = await fetch(path);
+    const text = await res.text();
+    const parsed = parseAnnoCSV(text);
+    setData(prev => ({ ...prev, annotations: parsed }));
+    setLoadedAnnoName(label);
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
 
@@ -395,10 +435,25 @@ export default function Page() {
                 Export SVG
               </button>
             </div>
+
             <div className="text-xs text-gray-600">Pairs table CSV</div>
             <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} />
             <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
-            <div className="text-xs text-gray-600 pt-2">Annotations CSV</div>
+
+            <div className="text-xs text-gray-600 pt-2 flex items-center gap-2">
+              <span>Annotations CSV</span>
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "preset-ec") loadPresetAnno("/Anno_EC.csv", "Anno_EC.csv");
+                }}
+                defaultValue=""
+              >
+                <option value="" disabled>Select preset…</option>
+                <option value="preset-ec">Anno_EC.csv</option>
+              </select>
+            </div>
             <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} />
             <div className="text-xs text-gray-500">{loadedAnnoName || "(using simulated annotations)"}</div>
             <p className="text-[11px] text-gray-500 mt-2">
@@ -413,6 +468,7 @@ export default function Page() {
             <ScatterPlot
               focal={focal}
               focalAnn={geneIndex[focal]}
+              focalChimeraTotal={focalChimeraTotal}
               partners={partners}
               genomeMax={genomeMax}
               yCap={yCap}
@@ -424,26 +480,40 @@ export default function Page() {
 
             <div className="mt-3 flex flex-wrap gap-4 items-center">
               <span className="text-sm font-medium">Feature types</span>
-              {["CDS","5'UTR","3'UTR","ncRNA","sRNA","tRNA","rRNA","sponge","hkRNA"].map(k => (
-                <span key={k} className="inline-flex items-center gap-2 text-xs">
+              {/* Combined legend entries */}
+              {[
+                { key: "CDS", color: pickColor("CDS"), label: "cds", italic: true },
+                { key: "5'UTR", color: pickColor("5'UTR"), label: "5'utr", italic: true },
+                { key: "3'UTR", color: pickColor("3'UTR"), label: "3'utr", italic: true },
+                { key: "sRNA/ncRNA", color: pickColor("sRNA"), label: "SRNA/ncRNA", italic: false },
+                { key: "tRNA", color: pickColor("tRNA"), label: "trna", italic: true },
+                { key: "rRNA/hkRNA", color: pickColor("rRNA"), label: "rrna/hkrna", italic: true },
+                { key: "sponge", color: pickColor("sponge"), label: "Sponge", italic: false },
+              ].map(item => (
+                <span key={item.key} className="inline-flex items-center gap-2 text-xs">
                   <span
                     className="inline-block w-3 h-3 rounded-full border"
-                    style={{ background: "#fff", borderColor: pickColor(k as FeatureType), boxShadow: `inset 0 0 0 2px ${pickColor(k as FeatureType)}` }}
+                    style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}
                   />
-                  {k}
+                  <span style={{ fontStyle: item.italic ? "italic" as const : "normal" }}>{item.label}</span>
                 </span>
               ))}
-              <span className="ml-6 text-xs text-gray-500">Circle size = counts</span>
+              <span className="ml-6 text-xs text-gray-500">Circle size ∝ √counts</span>
             </div>
           </section>
 
           <section className="border rounded-2xl p-4 shadow-sm">
             <div className="flex justify-between items-center mb-3">
               <div className="font-semibold">
-                Partners for <span className="text-blue-600">{focal}</span>{" "}
-                <span className="text-xs text-gray-500">({partners.length} shown)</span>
+                Partners for <span className="text-blue-600">{focalAnn ? displayGene(focal) : displayGene(focal)}</span>{" "}
+                {focalAnn && (
+                  <span className="text-xs text-gray-500">
+                    ({focalAnn.start}–{focalAnn.end})
+                  </span>
+                )}{" "}
+                <span className="text-xs text-gray-400">({partners.length} shown)</span>
               </div>
-              <div className="text-xs text-gray-500">sorted by odds_ratio</div>
+              <div className="text-xs text-gray-500">sorted by odds ratio</div>
             </div>
             <div className="overflow-auto max-h-[500px]">
               <table className="min-w-full text-sm">
@@ -452,32 +522,39 @@ export default function Page() {
                     <th className="py-1 pr-4">Partner</th>
                     <th className="py-1 pr-4">Feature</th>
                     <th className="py-1 pr-4">Start</th>
-                    <th className="py-1 pr-4">Counts</th>
-                    <th className="py-1 pr-4">Odds ratio</th>
+                    <th className="py-1 pr-4">
+                      <span><em>i</em><sub>o</sub></span> (chimeras)
+                    </th>
+                    <th className="py-1 pr-4">
+                      odds ratio (<em>O</em><sup>f</sup>)
+                    </th>
                     <th className="py-1 pr-4">Distance</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {partners.map(row => (
-                    <tr
-                      key={row.partner}
-                      className="hover:bg-gray-50 cursor-pointer"
-                      onClick={() => setFocal(row.partner)}
-                    >
-                      <td className="py-1 pr-4 text-blue-700">{row.partner}</td>
-                      <td className="py-1 pr-4">
-                        <span
-                          className="inline-block w-3 h-3 rounded-full mr-1"
-                          style={{ background: pickColor(row.type), border: "1px solid #333" }}
-                        />
-                        {row.type}
-                      </td>
-                      <td className="py-1 pr-4">{row.x}</td>
-                      <td className="py-1 pr-4">{row.counts}</td>
-                      <td className="py-1 pr-4">{row.rawY.toFixed(1)}</td>
-                      <td className="py-1 pr-4">{row.distance}</td>
-                    </tr>
-                  ))}
+                  {partners.map(row => {
+                    const disp = combinedLabel(row.type);
+                    return (
+                      <tr
+                        key={row.partner}
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={() => setFocal(row.partner)}
+                      >
+                        <td className="py-1 pr-4 text-blue-700">{displayGene(row.partner)}</td>
+                        <td className="py-1 pr-4">
+                          <span
+                            className="inline-block w-3 h-3 rounded-full mr-1"
+                            style={{ background: pickColor(row.type), border: "1px solid #333" }}
+                          />
+                          <span style={{ fontStyle: disp.italic ? "italic" : "normal" }}>{disp.label}</span>
+                        </td>
+                        <td className="py-1 pr-4">{row.start}</td>
+                        <td className="py-1 pr-4">{row.counts}</td>
+                        <td className="py-1 pr-4">{row.rawY.toFixed(1)}</td>
+                        <td className="py-1 pr-4">{row.distance}</td>
+                      </tr>
+                    );
+                  })}
                   {partners.length === 0 && (
                     <tr>
                       <td colSpan={6} className="py-2 text-gray-500">
@@ -498,6 +575,7 @@ export default function Page() {
 function ScatterPlot({
   focal,
   focalAnn,
+  focalChimeraTotal,
   partners,
   genomeMax,
   yCap,
@@ -508,6 +586,7 @@ function ScatterPlot({
 }: {
   focal: string;
   focalAnn?: Annotation;
+  focalChimeraTotal: number;
   partners: ScatterRow[];
   genomeMax: number;
   yCap: number;
@@ -522,7 +601,7 @@ function ScatterPlot({
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
 
-  const xScale = (x: number) => (x / (genomeMax * 1.05)) * innerW;
+  const xScale = (x: number) => (x / genomeMax) * innerW;
   const yScale = (v: number) => {
     const t = symlog(v, 10, 10);
     const tMax = symlog(yCap, 10, 10);
@@ -574,12 +653,21 @@ function ScatterPlot({
             Odds ratio
           </text>
 
-          {/* focal marker */}
+          {/* focal marker at midpoint and with total chimeras */}
           {focalAnn && (
             <g>
-              <line x1={xScale(focalAnn.start)} y1={0} x2={xScale(focalAnn.start)} y2={innerH} stroke="#444" strokeDasharray="3 3" />
-              <polygon points={`${xScale(focalAnn.start)-6},${innerH+10} ${xScale(focalAnn.start)+6},${innerH+10} ${xScale(focalAnn.start)},${innerH+2}`} fill="#000" />
-              <text x={xScale(focalAnn.start)} y={-2} textAnchor="middle">{focal}</text>
+              {(() => {
+                const mid = Math.floor((focalAnn.start + focalAnn.end) / 2);
+                return (
+                  <>
+                    <line x1={xScale(mid)} y1={0} x2={xScale(mid)} y2={innerH} stroke="#444" strokeDasharray="3 3" />
+                    <polygon points={`${xScale(mid)-6},${innerH+10} ${xScale(mid)+6},${innerH+10} ${xScale(mid)},${innerH+2}`} fill="#000" />
+                    <text x={xScale(mid)} y={-2} textAnchor="middle">
+                      {displayGene(focal)} ({focalChimeraTotal})
+                    </text>
+                  </>
+                );
+              })()}
             </g>
           )}
 
@@ -602,10 +690,10 @@ function ScatterPlot({
             );
           })}
 
-          {/* labels */}
+          {/* labels (gene names) */}
           {labels.map((p, i) => (
             <g key={i} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
-              <text x={6} y={-6}>{p.partner}</text>
+              <text x={6} y={-6}>{displayGene(p.partner)}</text>
             </g>
           ))}
         </g>

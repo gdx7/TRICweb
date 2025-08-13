@@ -281,7 +281,7 @@ export default function PairMapPage() {
             </div>
           </label>
           <label className="text-sm">
-            <div className="text-slate-700 mb-1">Contacts (.bed or .csv)</div>
+            <div className="text-slate-700 mb-1">Chimeras (.bed or .csv)</div>
             <input type="file" accept=".bed,.csv" onChange={onContactsFile}/>
           </label>
         </div>

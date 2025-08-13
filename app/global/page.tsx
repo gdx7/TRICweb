@@ -227,7 +227,8 @@ export default function Page() {
       seen.set(partner, Math.max(seen.get(partner) || 0, c));
     }
     let sum = 0;
-    for (const v of seen.values()) sum += v;
+    // Avoid downlevel iteration issues on MapIterator in some TS targets:
+    seen.forEach((v) => { sum += v; });
     return sum;
   }, [pairs, focal]);
 

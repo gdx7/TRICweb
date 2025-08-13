@@ -415,12 +415,12 @@ export default function FoldMapPage() {
                 onChange={(e) => {
                   const url = e.target.value;
                   if (!url) return;
-                  const item = PRESETS.contacts.find(p => p.url === url);
+                  const item = PRESETS.chimeras.find(p => p.url === url);
                   loadChimerasFromURL(url, item?.label);
                 }}
               >
                 <option value="" disabled>Select preset…</option>
-                {PRESETS.contacts.map((p) => (
+                {PRESETS.chimeras.map((p) => (
                   <option key={p.url} value={p.url}>{p.label}</option>
                 ))}
               </select>

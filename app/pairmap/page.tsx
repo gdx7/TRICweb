@@ -316,7 +316,7 @@ export default function PairMapPage() {
                 onChange={(e) => { const u = e.target.value; if (u) loadContactsFromURL(u); }}
               >
                 <option value="" disabled>Select preset…</option>
-                {PRESETS.contacts.map(p => (
+                {PRESETS.chimeras.map(p => (
                   <option key={p.url} value={p.url}>{p.label}</option>
                 ))}
               </select>

@@ -541,8 +541,6 @@ export default function Page() {
             
             <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
 
-            <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
-
             <div className="text-xs text-gray-600 pt-2 flex items-center gap-2">
               <span>Annotations CSV</span>
               <select

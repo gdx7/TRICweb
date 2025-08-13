@@ -5,7 +5,7 @@ import Papa from "papaparse";
 
 /* ---------------- Types ---------------- */
 type FeatureType =
-  | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | string;
+  | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
 
 type Annotation = {
   gene_name: string;
@@ -18,6 +18,15 @@ type Annotation = {
 
 /* ---------------- Helpers ---------------- */
 const cf = (s: string) => String(s || "").trim().toLowerCase(); // case-insensitive key
+const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+// Match globalMAP name rules:
+function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
+  const t = (type || "CDS") as FeatureType;
+  if (t === "sRNA" || t === "ncRNA" || t === "sponge") {
+    return { text: cap1(name), italic: false };
+  }
+  return { text: name, italic: true };
+}
 
 function exportSVG(svgId: string, name: string) {
   const el = document.getElementById(svgId) as SVGSVGElement | null;
@@ -111,6 +120,11 @@ export default function PairMapPage() {
     const f = e.target.files?.[0]; if (!f) return;
     setContacts(await parseContacts(f));
   }
+  async function loadPresetAnno(path: string) {
+    const res = await fetch(path);
+    const text = await res.text();
+    setAnnotations(parseAnnoCSV(text));
+  }
 
   // Build one heatmap per X-gene
   const mats = useMemo(() => {
@@ -144,6 +158,7 @@ export default function PairMapPage() {
 
       return {
         label,
+        typeX: ann.feature_type as FeatureType | undefined,
         mat,
         bins_x, bins_y,
         // ticks
@@ -162,8 +177,8 @@ export default function PairMapPage() {
   const H = panelH + 120;
 
   // Simple multi-palette function
-  function colorFrom(val: number, vmax: number, paletteIndex: number) {
-    const t = Math.max(0, Math.min(1, val / Math.max(1, vmax)));
+  function colorFrom(val: number, vmaxVal: number, paletteIndex: number) {
+    const t = Math.max(0, Math.min(1, val / Math.max(1, vmaxVal)));
     const hues = [0, 120, 220, 30, 280, 0]; // red, green, blue, orange, purple, grey
     const hue = hues[paletteIndex]!;
     if (paletteIndex === 5) {
@@ -173,6 +188,8 @@ export default function PairMapPage() {
     }
     return `hsla(${hue}, 75%, 50%, ${Math.pow(t, 0.85)})`;
   }
+
+  const dispY = formatGeneName(primaryRNA, yAnn?.feature_type);
 
   return (
     <div className="mx-auto max-w-[1500px] p-4">
@@ -219,25 +236,49 @@ export default function PairMapPage() {
           <span className="text-xs text-slate-600 w-14 text-right">{flankX} nt</span>
         </div>
 
-        {/* BIN + VMAX */}
+        {/* Bin size + Vmax */}
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-700 w-20">BIN</label>
+          <label className="text-sm text-slate-700 w-20">Bin size</label>
           <input type="range" min={5} max={50} step={5} value={binSize}
                  onChange={(e)=>setBinSize(Number(e.target.value))}/>
-          <span className="text-xs text-slate-600 w-14 text-right">{binSize} nt/bin</span>
+          <span className="text-xs text-slate-600 w-20 text-right">{binSize} nt/bin</span>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-700 w-20">VMAX</label>
+          <label className="text-sm text-slate-700 w-20">Vmax</label>
           <input type="range" min={1} max={50} step={1} value={vmax}
                  onChange={(e)=>setVmax(Number(e.target.value))}/>
           <span className="text-xs text-slate-600 w-10 text-right">{vmax}</span>
         </div>
 
         <div className="flex-1" />
-        <div className="flex gap-6">
+        <div className="flex gap-6 items-center">
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Annotations CSV</div>
-            <input type="file" accept=".csv" onChange={onAnnoFile}/>
+            <div className="flex items-center gap-2">
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                defaultValue=""
+                onChange={(e) => {
+                  const map: Record<string, string> = {
+                    "preset-ec": "/Anno_EC.csv",
+                    "preset-ss": "/Anno_SS.csv",
+                    "preset-mx": "/Anno_MX.csv",
+                    "preset-sa": "/Anno_SA.csv",
+                    "preset-bs": "/Anno_BS.csv",
+                  };
+                  const v = e.target.value;
+                  if (map[v]) loadPresetAnno(map[v]);
+                }}
+              >
+                <option value="" disabled>Select preset…</option>
+                <option value="preset-ec">Anno_EC.csv</option>
+                <option value="preset-ss">Anno_SS.csv</option>
+                <option value="preset-mx">Anno_MX.csv</option>
+                <option value="preset-sa">Anno_SA.csv</option>
+                <option value="preset-bs">Anno_BS.csv</option>
+              </select>
+              <input type="file" accept=".csv" onChange={onAnnoFile}/>
+            </div>
           </label>
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Contacts (.bed or .csv)</div>
@@ -257,25 +298,27 @@ export default function PairMapPage() {
             const left = 10 + i * panelW;
             const top = 28;
 
-            const cw = panelW - (leftPad + 30);     // inner width
-            const ch = panelH - (10 + bottomPad);   // inner height
+            const cw = panelW - (54 + 30);     // inner width (uses leftPad=54)
+            const ch = panelH - (10 + 56);     // inner height (uses bottomPad=56)
             const cellW = cw / m.bins_x;
             const cellH = ch / m.bins_y;
 
             // helper to place Y (invert axis: 0 bin appears at bottom)
             const yPix = (bin: number) => 10 + (m.bins_y - 1 - bin) * cellH;
 
+            const dispX = formatGeneName(m.label, m.typeX);
+
             return (
               <g key={i} transform={`translate(${left},${top})`}>
                 {/* frame */}
-                <rect x={leftPad} y={10} width={cw} height={ch} fill="#fff" stroke="#222" strokeWidth={1} />
+                <rect x={54} y={10} width={cw} height={ch} fill="#fff" stroke="#222" strokeWidth={1} />
 
                 {/* cells with per-panel palette + vmax (Y inverted) */}
                 {m.mat.map((row, yy) =>
                   row.map((v, xx) => (
                     <rect
                       key={`${yy}-${xx}`}
-                      x={leftPad + xx * cellW}
+                      x={54 + xx * cellW}
                       y={yPix(yy)}
                       width={cellW}
                       height={cellH}
@@ -292,7 +335,7 @@ export default function PairMapPage() {
                   const xticks = [0, gx_s, gx_e, m.bins_x - 1];
                   const xlbls = [`-${flankX}`, "start", "end", `+${flankX}`];
                   return xticks.map((b, j) => (
-                    <g key={j} transform={`translate(${leftPad + (b / m.bins_x) * cw},${10 + ch})`}>
+                    <g key={j} transform={`translate(${54 + (b / m.bins_x) * cw},${10 + ch})`}>
                       <line x1={0} y1={0} x2={0} y2={6} stroke="#222" />
                       <text x={0} y={18} textAnchor="middle">{xlbls[j]}</text>
                     </g>
@@ -307,17 +350,19 @@ export default function PairMapPage() {
                   const yticks = [0, gy_s, gy_e, m.bins_y - 1];
                   const ylbls = [`-${flankY}`, "start", "end", `+${flankY}`];
                   return yticks.map((b, j) => (
-                    <g key={j} transform={`translate(${leftPad},${yPix(b)})`}>
+                    <g key={j} transform={`translate(${54},${yPix(b)})`}>
                       <line x1={-6} y1={0} x2={0} y2={0} stroke="#222" />
                       <text x={-10} y={3} textAnchor="end">{ylbls[j]}</text>
                     </g>
                   ));
                 })()}
 
-                {/* axis labels */}
-                <text x={leftPad + cw / 2} y={ch + 38} textAnchor="middle">{m.label} (5′→3′)</text>
-                <text transform={`translate(${leftPad - 34},${10 + ch / 2}) rotate(-90)`} textAnchor="middle">
-                  {primaryRNA} (5′→3′)
+                {/* axis labels with globalMAP-style formatting */}
+                <text x={54 + cw / 2} y={ch + 38} textAnchor="middle" style={{ fontStyle: dispX.italic ? "italic" : "normal" }}>
+                  {dispX.text} (5′→3′)
+                </text>
+                <text transform={`translate(${54 - 34},${10 + ch / 2}) rotate(-90)`} textAnchor="middle" style={{ fontStyle: dispY.italic ? "italic" : "normal" }}>
+                  {dispY.text} (5′→3′)
                 </text>
               </g>
             );
@@ -327,7 +372,7 @@ export default function PairMapPage() {
 
       {!yAnn && (
         <div className="mt-2 text-xs text-amber-700">
-          Upload annotations and ensure the primary RNA exists (names are case-insensitive).
+          Upload annotations (via dropdown or file) and ensure the primary RNA exists (names are case-insensitive).
         </div>
       )}
     </div>

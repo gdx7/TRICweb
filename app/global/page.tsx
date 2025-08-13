@@ -123,7 +123,7 @@ function simulateData(nGenes = 500) {
     addEdge(a, b, 1);
   }
 
-  // Pick a couple of sRNAs/ncRNAs as hubs in the simulation (generic names)
+  // Make a generic sRNA/ncRNA hub in the simulation
   const sLike = ann.filter(a => a.feature_type === "sRNA" || a.feature_type === "ncRNA").map(a => a.gene_name);
   const pick = (n: number) => Array.from({ length: n }, () => genes[Math.floor(rng() * genes.length)]);
   if (sLike.length > 0) pick(60).forEach(g => addEdge(sLike[Math.floor(rng() * sLike.length)], g, 4));
@@ -140,37 +140,31 @@ function symlog(y: number, linthresh = 10, base = 10) {
 // ---- display helpers ----
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
+// Italicize CDS/UTRs/etc **without** changing case; TitleCase only for sRNA/ncRNA/sponge
 function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
   const t = type || "CDS";
   if (t === "sRNA" || t === "ncRNA" || t === "sponge") {
-    // Non-italic, TitleCase first letter (e.g., sroC -> SroC)
-    return { text: cap1(name), italic: false };
+    return { text: cap1(name), italic: false }; // e.g., sroC -> SroC
   }
-  if (t === "5'UTR" || t === "3'UTR") {
-    const m = name.match(/^(5'|3')(.+)$/i);
-    if (m) return { text: `${m[1]}${cap1(m[2])}`, italic: true };
-    return { text: cap1(name), italic: true };
-  }
-  // CDS/tRNA/rRNA/hkRNA -> italic, first letter capitalized (argT -> ArgT)
-  return { text: cap1(name), italic: true };
+  // For 5'UTR, 3'UTR, CDS, tRNA, rRNA, hkRNA: keep exact casing, italicize
+  return { text: name, italic: true }; // e.g., 5'argT stays "5'argT" but italic
 }
 
 const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
   if (ft === "sRNA" || ft === "ncRNA") return { label: "sRNA/ncRNA", italic: false };
   if (ft === "sponge") return { label: "Sponge", italic: false };
   if (ft === "rRNA" || ft === "hkRNA") return { label: "rRNA/hkRNA", italic: false };
-  // keep canonical case for others in legend
   return { label: ft, italic: false };
 };
 
 export default function Page() {
   const [data, setData] = useState(() => simulateData(500));
-  const [focal, setFocal] = useState<string>("srna1"); // generic simulated sRNA by default
+  const [focal, setFocal] = useState<string>("srna1");
   const [minCounts, setMinCounts] = useState(5);
   const [minDistance, setMinDistance] = useState(5000);
   const [yCap, setYCap] = useState(5000);
   const [labelThreshold, setLabelThreshold] = useState(50);
-  const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["rRNA", "tRNA"]);
+  const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["tRNA"]);
   const [query, setQuery] = useState("");
   const [highlightQuery, setHighlightQuery] = useState("");
 
@@ -196,9 +190,6 @@ export default function Page() {
     return new Set(toks);
   }, [highlightQuery]);
 
-  // aggregate edges for focal (dedupe symmetric rows):
-  // - counts: take MAX across orientations (avoid doubling)
-  // - odds_ratio: take MAX
   const partners = useMemo<ScatterRow[]>(() => {
     const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
     const acc = new Map<string, ScatterRow>();
@@ -255,7 +246,7 @@ export default function Page() {
   // total chimeras for focal (deduped across orientations), independent of filters
   const focalChimeraTotal = useMemo(() => {
     const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
-    const seen = new Map<string, number>(); // partner -> max count
+    const seen = new Map<string, number>();
     for (const e of edges) {
       const ref = String(e.ref || "").trim();
       const tgt = String(e.target || "").trim();
@@ -265,7 +256,7 @@ export default function Page() {
       seen.set(partner, Math.max(seen.get(partner) || 0, c));
     }
     let sum = 0;
-    seen.forEach(v => { sum += v; }); // avoid MapIterator downlevel issue
+    seen.forEach(v => { sum += v; });
     return sum;
   }, [pairs, focal]);
 
@@ -327,7 +318,7 @@ export default function Page() {
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
 
-  // Load preset Anno_EC.csv from /public via dropdown
+  // Load preset Anno_*.csv from /public via dropdown
   async function loadPresetAnno(path: string, label: string) {
     const res = await fetch(path);
     const text = await res.text();
@@ -444,7 +435,7 @@ export default function Page() {
             <div className="text-xs text-gray-700">
               Exclude types:
               <div className="mt-1 flex flex-wrap gap-1">
-                {["rRNA", "tRNA", "hkRNA"].map(ft => {
+                {["tRNA", "hkRNA", "5'UTR", "3'UTR", "CDS", "sponge"].map(ft => {
                   const active = excludeTypes.includes(ft as FeatureType);
                   return (
                     <button
@@ -487,13 +478,24 @@ export default function Page() {
               <select
                 className="border rounded px-2 py-1 text-xs"
                 onChange={(e) => {
+                  const map: Record<string, string> = {
+                    "preset-ec": "/Anno_EC.csv",
+                    "preset-ss": "/Anno_SS.csv",
+                    "preset-mx": "/Anno_MX.csv",
+                    "preset-sa": "/Anno_SA.csv",
+                    "preset-bs": "/Anno_BS.csv",
+                  };
                   const v = e.target.value;
-                  if (v === "preset-ec") loadPresetAnno("/Anno_EC.csv", "Anno_EC.csv");
+                  if (map[v]) loadPresetAnno(map[v], map[v].slice(1));
                 }}
                 defaultValue=""
               >
                 <option value="" disabled>Select preset…</option>
                 <option value="preset-ec">Anno_EC.csv</option>
+                <option value="preset-ss">Anno_SS.csv</option>
+                <option value="preset-mx">Anno_MX.csv</option>
+                <option value="preset-sa">Anno_SA.csv</option>
+                <option value="preset-bs">Anno_BS.csv</option>
               </select>
             </div>
             <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} />
@@ -548,7 +550,7 @@ export default function Page() {
             <div className="flex justify-between items-center mb-3">
               <div className="font-semibold">
                 Partners for{" "}
-                <span className="text-blue-600">
+                <span className="text-blue-600" style={{ fontStyle: formatGeneName(focal, geneIndex[focal]?.feature_type).italic ? "italic" : "normal" }}>
                   {formatGeneName(focal, geneIndex[focal]?.feature_type).text}
                 </span>{" "}
                 {focalAnn && (
@@ -651,7 +653,7 @@ function ScatterPlot({
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
 
-  // ✅ scale by [genomeStart, genomeEnd] so positions align exactly
+  // scale by [genomeStart, genomeEnd] so positions align exactly
   const xScale = (x: number) => ((x - genomeStart) / genomeLen) * innerW;
   const yScale = (v: number) => {
     const t = symlog(v, 10, 10);
@@ -673,6 +675,10 @@ function ScatterPlot({
     })
     .slice(0, 80);
 
+  // X-axis ticks at 0.5, 1.0, ..., 4.5 Mb (only those within genomeLen)
+  const mbTicks = Array.from({ length: 9 }, (_, i) => 0.5 + i * 0.5)
+    .filter(m => m * 1_000_000 <= genomeLen);
+
   return (
     <div className="w-full overflow-x-auto">
       <svg id="scatter-svg" width={width} height={height} className="mx-auto block">
@@ -682,16 +688,18 @@ function ScatterPlot({
         <g transform={`translate(${margin.left},${margin.top})`}>
           {/* X-axis */}
           <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
-          {Array.from({ length: 6 }).map((_, i) => {
-            const xAbs = genomeStart + (i / 5) * genomeLen;
-            const labelMb = ((xAbs - genomeStart) / 1e6).toFixed(1);
+          {mbTicks.map((m, i) => {
+            const xAbs = genomeStart + m * 1_000_000;
             return (
               <g key={i} transform={`translate(${xScale(xAbs)},${innerH})`}>
                 <line y2={6} stroke="#222" />
-                <text y={20} textAnchor="middle">{labelMb} Mb</text>
+                <text y={20} textAnchor="middle">
+                  {Number.isInteger(m) ? `${m.toFixed(0)} Mb` : `${m} Mb`}
+                </text>
               </g>
             );
           })}
+
           {/* Y-axis */}
           <line x1={0} y1={0} x2={0} y2={innerH} stroke="#222" />
           {yTicks.map((t, i) => (
@@ -728,6 +736,7 @@ function ScatterPlot({
           {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => {
             const highlighted = highlightSet.has(p.partner);
             const face = highlighted ? "#FFEB3B" : "#FFFFFF";
+            const disp = formatGeneName(p.partner, p.type);
             return (
               <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
                 <circle
@@ -739,6 +748,7 @@ function ScatterPlot({
                   onClick={() => onClickPartner(p.partner)}
                 />
                 <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.12} />
+                {/* Optional: labels are handled below to avoid overplotting */}
               </g>
             );
           })}

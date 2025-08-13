@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState, useRef } from "react";
 import Papa from "papaparse";
+import { PRESETS } from "@/lib/presets";
 
 type FeatureType =
   | "CDS"
@@ -331,6 +332,15 @@ export default function Page() {
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
 
+  // NEW: Load interactions from URL (Vercel Blob preset)
+  async function loadPairsFromURL(url: string) {
+    const res = await fetch(url);
+    const text = await res.text();
+    const parsed = parsePairsCSV(text);
+    setData(prev => ({ ...prev, pairs: parsed }));
+    setLoadedPairsName(new URL(url).pathname.split("/").pop() || "interaction.csv");
+  }
+
   // Exclude groups (hkRNA/rRNA together, sRNA/ncRNA together)
   const EXCLUDE_GROUPS: ExcludeGroup[] = [
     { label: "tRNA", types: ["tRNA"] },
@@ -506,15 +516,27 @@ export default function Page() {
             </div>
 
             <div className="text-xs text-gray-600">Interaction analysis CSV</div>
-            {/* custom file button to avoid inline filename */}
-            <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
-            <button
-              className="border rounded px-3 py-1"
-              onClick={() => filePairsRef.current?.click()}
-              type="button"
-            >
-              Choose File
-            </button>
+            <div className="flex items-center gap-2">
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                defaultValue=""
+                onChange={(e) => { const u = e.target.value; if (u) loadPairsFromURL(u); }}
+              >
+                <option value="" disabled>Select preset…</option>
+                {PRESETS.interactions.map(p => (
+                  <option key={p.url} value={p.url}>{p.label}</option>
+                ))}
+              </select>
+              {/* custom file button to avoid inline filename */}
+              <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
+              <button
+                className="border rounded px-3 py-1"
+                onClick={() => filePairsRef.current?.click()}
+                type="button"
+              >
+                Choose File
+              </button>
+            </div>
             <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
 
             <div className="text-xs text-gray-600 pt-2 flex items-center gap-2">

@@ -57,11 +57,11 @@ export default function Home() {
         </div>
 
         <p className="mt-4 text-lg text-slate-600 max-w-3xl">
-          Explore global RNA–RNA interactions in bacteria:
+          Explore global RNA–RNA interactions and structures in bacteria
         </p>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction maps" />
+          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction map with clickable partners" />
           <ToolCard title="csMAP" href="/csmap" desc="Multi-RNA comparative target profiles" />
           <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps for binding sites" />
           <ToolCard title="foldMAP" href="/foldmap" desc="Structural contact maps of RNAs" />

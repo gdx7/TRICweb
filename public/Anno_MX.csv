@@ -1,3 +1,4 @@
+gene_name,start,end,feature_type,strand,locus_tag,chromosome
 dnaA,87,1439,CDS,+,MXAN_RS00015,NC_008095.1
 3'dnaA,1440,1479,3'UTR,+,MXAN_RS00015,NC_008095.1
 5'MXAN_RS00020,1480,1545,5'UTR,+,MXAN_RS00020,NC_008095.1

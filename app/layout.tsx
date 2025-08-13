@@ -44,7 +44,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <img src="/sils-logo.png" alt="SILS logo" className="h-14 w-auto opacity-90" />
             </div>
             <div className="text-sm text-slate-500">
-              © 2025 <a className="italic no-underline hover:text-slate-700" href="https://www.drna.nl" target="_blank" rel="noreferrer">www.drna.nl</a> — All rights reserved
+              © 2025{" "}
+              <a
+                className="italic no-underline hover:text-slate-700"
+                href="https://www.drna.nl"
+                target="_blank"
+                rel="noreferrer"
+              >
+                www.drna.nl
+              </a>{" "}
+              — Open access:{" "}
+              <a href="https://opensource.org/licenses/MIT" target="_blank" rel="noreferrer">
+                MIT License
+              </a>{" "}
+              (code),{" "}
+              <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">
+                CC BY 4.0
+              </a>{" "}
+              (data &amp; content)
             </div>
           </div>
         </footer>

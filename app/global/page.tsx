@@ -466,8 +466,8 @@ export default function Page() {
             <label className="text-xs text-gray-600">Circle size scale: ×{sizeScaleFactor.toFixed(1)}</label>
             <input
               type="range"
-              min={0.5}
-              max={3}
+              min={0.1}
+              max={2}
               step={0.1}
               value={sizeScaleFactor}
               onChange={e => setSizeScaleFactor(Number(e.target.value))}

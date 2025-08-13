@@ -37,7 +37,7 @@ type Pair = {
 
 type ScatterRow = {
   partner: string;
-  x: number;       // midpoint for plotting
+  x: number;       // genomic midpoint (absolute)
   start: number;   // genomic start
   end: number;     // genomic end
   y: number;       // capped OR for plotting
@@ -63,21 +63,43 @@ const pickColor = (ft?: FeatureType) => FEATURE_COLORS[ft || "CDS"] || "#F78208"
 function simulateData(nGenes = 500) {
   const rng = ((seed: number) => () => (seed = (seed * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(42);
   const ann: Annotation[] = [];
-  const classes: FeatureType[] = ["CDS", "5'UTR", "3'UTR", "ncRNA", "tRNA", "sRNA"];
-  const genomeLen = 4_600_000;
-  for (let i = 0; i < nGenes; i++) {
-    const ft = classes[Math.floor(rng() * classes.length)];
-    const start = Math.floor(rng() * genomeLen);
+  const genomeLen = 4_641_652;
+
+  // Create CDS genes gene1..geneN and optional UTR entries 5'geneX / 3'geneX
+  for (let i = 1; i <= nGenes; i++) {
+    const start = Math.floor(rng() * (genomeLen - 2000)) + 1;
     const len = Math.max(150, Math.floor(rng() * 1500));
-    const end = Math.min(start + len, genomeLen - 1);
-    const name = ft === "sRNA" ? `sRNA_${i}` : `gene_${i}`;
-    ann.push({ gene_name: name, start, end, feature_type: ft, strand: rng() > 0.5 ? "+" : "-", chromosome: "chr" });
+    const end = Math.min(start + len, genomeLen);
+    ann.push({ gene_name: `gene${i}`, start, end, feature_type: "CDS", strand: rng() > 0.5 ? "+" : "-", chromosome: "chr" });
+
+    if (rng() > 0.4) {
+      const u5s = Math.max(1, start - Math.floor(rng() * 150));
+      const u5e = Math.min(start + Math.floor(len * 0.2), genomeLen);
+      ann.push({ gene_name: `5'gene${i}`, start: u5s, end: u5e, feature_type: "5'UTR", strand: "+", chromosome: "chr" });
+    }
+    if (rng() > 0.4) {
+      const u3s = Math.max(end - Math.floor(len * 0.2), 1);
+      const u3e = Math.min(end + Math.floor(rng() * 150), genomeLen);
+      ann.push({ gene_name: `3'gene${i}`, start: u3s, end: u3e, feature_type: "3'UTR", strand: "+", chromosome: "chr" });
+    }
   }
-  ann.push({ gene_name: "GcvB", start: 3500000, end: 3500600, feature_type: "sRNA", strand: "+", chromosome: "chr" });
-  ann.push({ gene_name: "CpxQ", start: 1800000, end: 1800480, feature_type: "sRNA", strand: "+", chromosome: "chr" });
+
+  // Add some sRNAs/ncRNAs/sponges with generic names
+  for (let i = 1; i <= Math.floor(nGenes * 0.08); i++) {
+    const start = Math.floor(rng() * (genomeLen - 400)) + 1;
+    const end = Math.min(start + 200 + Math.floor(rng() * 200), genomeLen);
+    const t = rng() < 0.5 ? "sRNA" : "ncRNA";
+    ann.push({ gene_name: `${t.toLowerCase()}${i}`, start, end, feature_type: t, strand: "+", chromosome: "chr" });
+  }
+  for (let i = 1; i <= Math.floor(nGenes * 0.02); i++) {
+    const start = Math.floor(rng() * (genomeLen - 400)) + 1;
+    const end = Math.min(start + 200 + Math.floor(rng() * 200), genomeLen);
+    ann.push({ gene_name: `sponge${i}`, start, end, feature_type: "sponge", strand: "+", chromosome: "chr" });
+  }
 
   const pairs: Pair[] = [];
   const genes = ann.map(a => a.gene_name);
+
   function addEdge(a: string, b: string, bias = 1) {
     const c = Math.max(1, Math.floor((rng() ** 2) * 120 * bias));
     const or = 0.5 + Math.pow(rng(), 0.4) * 400 * bias;
@@ -92,15 +114,19 @@ function simulateData(nGenes = 500) {
       target_type: bAnn?.feature_type,
     });
   }
+
+  // Random edges
   for (let k = 0; k < nGenes * 2; k++) {
     const a = genes[Math.floor(rng() * genes.length)];
     let b = genes[Math.floor(rng() * genes.length)];
     if (a === b) continue;
     addEdge(a, b, 1);
   }
+
+  // Pick a couple of sRNAs/ncRNAs as hubs in the simulation (generic names)
+  const sLike = ann.filter(a => a.feature_type === "sRNA" || a.feature_type === "ncRNA").map(a => a.gene_name);
   const pick = (n: number) => Array.from({ length: n }, () => genes[Math.floor(rng() * genes.length)]);
-  pick(60).forEach(g => addEdge("GcvB", g, 4));
-  pick(40).forEach(g => addEdge("CpxQ", g, 3));
+  if (sLike.length > 0) pick(60).forEach(g => addEdge(sLike[Math.floor(rng() * sLike.length)], g, 4));
 
   return { annotations: ann, pairs };
 }
@@ -111,23 +137,35 @@ function symlog(y: number, linthresh = 10, base = 10) {
   return a <= linthresh ? s * (a / linthresh) : s * (1 + Math.log(a / linthresh) / Math.log(base));
 }
 
-// helpers for display rules
-const displayGene = (name: string) => (name ? name[0].toUpperCase() + name.slice(1) : name);
+// ---- display helpers ----
+const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
+  const t = type || "CDS";
+  if (t === "sRNA" || t === "ncRNA" || t === "sponge") {
+    // Non-italic, TitleCase first letter (e.g., sroC -> SroC)
+    return { text: cap1(name), italic: false };
+  }
+  if (t === "5'UTR" || t === "3'UTR") {
+    const m = name.match(/^(5'|3')(.+)$/i);
+    if (m) return { text: `${m[1]}${cap1(m[2])}`, italic: true };
+    return { text: cap1(name), italic: true };
+  }
+  // CDS/tRNA/rRNA/hkRNA -> italic, first letter capitalized (argT -> ArgT)
+  return { text: cap1(name), italic: true };
+}
 
 const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
-  if (ft === "sRNA" || ft === "ncRNA") return { label: "SRNA/ncRNA", italic: false }; // starts with uppercase per request
+  if (ft === "sRNA" || ft === "ncRNA") return { label: "sRNA/ncRNA", italic: false };
   if (ft === "sponge") return { label: "Sponge", italic: false };
-  if (ft === "rRNA" || ft === "hkRNA") return { label: "rrna/hkrna", italic: true };
-  if (ft === "CDS") return { label: "cds", italic: true };
-  if (ft === "tRNA") return { label: "trna", italic: true };
-  if (ft === "5'UTR") return { label: "5'utr", italic: true };
-  if (ft === "3'UTR") return { label: "3'utr", italic: true };
-  return { label: String(ft || "").toLowerCase(), italic: true };
+  if (ft === "rRNA" || ft === "hkRNA") return { label: "rRNA/hkRNA", italic: false };
+  // keep canonical case for others in legend
+  return { label: ft, italic: false };
 };
 
 export default function Page() {
   const [data, setData] = useState(() => simulateData(500));
-  const [focal, setFocal] = useState<string>("GcvB");
+  const [focal, setFocal] = useState<string>("srna1"); // generic simulated sRNA by default
   const [minCounts, setMinCounts] = useState(5);
   const [minDistance, setMinDistance] = useState(5000);
   const [yCap, setYCap] = useState(5000);
@@ -175,8 +213,8 @@ export default function Page() {
       const focalAnn = geneIndex[focal];
       if (!partAnn || !focalAnn) continue;
 
-      const partMid = Math.floor((partAnn.start + partAnn.end) / 2);     // ✅ use midpoint for X
-      const focalMid = Math.floor((focalAnn.start + focalAnn.end) / 2);  // (used only for distance)
+      const partMid = Math.floor((partAnn.start + partAnn.end) / 2);
+      const focalMid = Math.floor((focalAnn.start + focalAnn.end) / 2);
       const dist = Math.abs(partMid - focalMid);
 
       const or = Number(e.odds_ratio) || 0;
@@ -227,12 +265,15 @@ export default function Page() {
       seen.set(partner, Math.max(seen.get(partner) || 0, c));
     }
     let sum = 0;
-    // Avoid downlevel iteration issues on MapIterator in some TS targets:
-    seen.forEach((v) => { sum += v; });
+    seen.forEach(v => { sum += v; }); // avoid MapIterator downlevel issue
     return sum;
   }, [pairs, focal]);
 
-  const genomeMax = useMemo(() => Math.max(...annotations.map(a => a.end)), [annotations]);
+  // genome domain (use min start and max end to avoid X-shift)
+  const genomeStart = useMemo(() => Math.min(...annotations.map(a => a.start)), [annotations]);
+  const genomeEnd = useMemo(() => Math.max(...annotations.map(a => a.end)), [annotations]);
+  const genomeLen = Math.max(1, genomeEnd - genomeStart);
+
   const focalAnn = geneIndex[focal];
 
   const yTicks = useMemo(() => [0, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter(v => v <= yCap), [yCap]);
@@ -471,7 +512,8 @@ export default function Page() {
               focalAnn={geneIndex[focal]}
               focalChimeraTotal={focalChimeraTotal}
               partners={partners}
-              genomeMax={genomeMax}
+              genomeStart={genomeStart}
+              genomeLen={genomeLen}
               yCap={yCap}
               yTicks={yTicks}
               labelThreshold={labelThreshold}
@@ -481,22 +523,21 @@ export default function Page() {
 
             <div className="mt-3 flex flex-wrap gap-4 items-center">
               <span className="text-sm font-medium">Feature types</span>
-              {/* Combined legend entries */}
               {[
-                { key: "CDS", color: pickColor("CDS"), label: "cds", italic: true },
-                { key: "5'UTR", color: pickColor("5'UTR"), label: "5'utr", italic: true },
-                { key: "3'UTR", color: pickColor("3'UTR"), label: "3'utr", italic: true },
-                { key: "sRNA/ncRNA", color: pickColor("sRNA"), label: "SRNA/ncRNA", italic: false },
-                { key: "tRNA", color: pickColor("tRNA"), label: "trna", italic: true },
-                { key: "rRNA/hkRNA", color: pickColor("rRNA"), label: "rrna/hkrna", italic: true },
-                { key: "sponge", color: pickColor("sponge"), label: "Sponge", italic: false },
+                { key: "CDS", color: pickColor("CDS"), label: "CDS" },
+                { key: "5'UTR", color: pickColor("5'UTR"), label: "5'UTR" },
+                { key: "3'UTR", color: pickColor("3'UTR"), label: "3'UTR" },
+                { key: "sRNA/ncRNA", color: pickColor("sRNA"), label: "sRNA/ncRNA" },
+                { key: "tRNA", color: pickColor("tRNA"), label: "tRNA" },
+                { key: "rRNA/hkRNA", color: pickColor("rRNA"), label: "rRNA/hkRNA" },
+                { key: "sponge", color: pickColor("sponge"), label: "Sponge" },
               ].map(item => (
                 <span key={item.key} className="inline-flex items-center gap-2 text-xs">
                   <span
                     className="inline-block w-3 h-3 rounded-full border"
                     style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}
                   />
-                  <span style={{ fontStyle: item.italic ? "italic" as const : "normal" }}>{item.label}</span>
+                  {item.label}
                 </span>
               ))}
               <span className="ml-6 text-xs text-gray-500">Circle size ∝ √counts</span>
@@ -506,7 +547,10 @@ export default function Page() {
           <section className="border rounded-2xl p-4 shadow-sm">
             <div className="flex justify-between items-center mb-3">
               <div className="font-semibold">
-                Partners for <span className="text-blue-600">{focalAnn ? displayGene(focal) : displayGene(focal)}</span>{" "}
+                Partners for{" "}
+                <span className="text-blue-600">
+                  {formatGeneName(focal, geneIndex[focal]?.feature_type).text}
+                </span>{" "}
                 {focalAnn && (
                   <span className="text-xs text-gray-500">
                     ({focalAnn.start}–{focalAnn.end})
@@ -534,20 +578,23 @@ export default function Page() {
                 </thead>
                 <tbody>
                   {partners.map(row => {
-                    const disp = combinedLabel(row.type);
+                    const dispName = formatGeneName(row.partner, row.type);
+                    const typeDisp = combinedLabel(row.type);
                     return (
                       <tr
                         key={row.partner}
                         className="hover:bg-gray-50 cursor-pointer"
                         onClick={() => setFocal(row.partner)}
                       >
-                        <td className="py-1 pr-4 text-blue-700">{displayGene(row.partner)}</td>
+                        <td className="py-1 pr-4 text-blue-700" style={{ fontStyle: dispName.italic ? "italic" : "normal" }}>
+                          {dispName.text}
+                        </td>
                         <td className="py-1 pr-4">
                           <span
                             className="inline-block w-3 h-3 rounded-full mr-1"
                             style={{ background: pickColor(row.type), border: "1px solid #333" }}
                           />
-                          <span style={{ fontStyle: disp.italic ? "italic" : "normal" }}>{disp.label}</span>
+                          {typeDisp.label}
                         </td>
                         <td className="py-1 pr-4">{row.start}</td>
                         <td className="py-1 pr-4">{row.counts}</td>
@@ -578,7 +625,8 @@ function ScatterPlot({
   focalAnn,
   focalChimeraTotal,
   partners,
-  genomeMax,
+  genomeStart,
+  genomeLen,
   yCap,
   yTicks,
   labelThreshold,
@@ -589,7 +637,8 @@ function ScatterPlot({
   focalAnn?: Annotation;
   focalChimeraTotal: number;
   partners: ScatterRow[];
-  genomeMax: number;
+  genomeStart: number;
+  genomeLen: number;
   yCap: number;
   yTicks: number[];
   labelThreshold: number;
@@ -602,7 +651,8 @@ function ScatterPlot({
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
 
-  const xScale = (x: number) => (x / genomeMax) * innerW;
+  // ✅ scale by [genomeStart, genomeEnd] so positions align exactly
+  const xScale = (x: number) => ((x - genomeStart) / genomeLen) * innerW;
   const yScale = (v: number) => {
     const t = symlog(v, 10, 10);
     const tMax = symlog(yCap, 10, 10);
@@ -633,11 +683,12 @@ function ScatterPlot({
           {/* X-axis */}
           <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
           {Array.from({ length: 6 }).map((_, i) => {
-            const x = (i / 5) * genomeMax;
+            const xAbs = genomeStart + (i / 5) * genomeLen;
+            const labelMb = ((xAbs - genomeStart) / 1e6).toFixed(1);
             return (
-              <g key={i} transform={`translate(${xScale(x)},${innerH})`}>
+              <g key={i} transform={`translate(${xScale(xAbs)},${innerH})`}>
                 <line y2={6} stroke="#222" />
-                <text y={20} textAnchor="middle">{Math.round(x / 1e6)} Mb</text>
+                <text y={20} textAnchor="middle">{labelMb} Mb</text>
               </g>
             );
           })}
@@ -658,13 +709,14 @@ function ScatterPlot({
           {focalAnn && (
             <g>
               {(() => {
-                const mid = Math.floor((focalAnn.start + focalAnn.end) / 2);
+                const midAbs = Math.floor((focalAnn.start + focalAnn.end) / 2);
+                const disp = formatGeneName(focal, focalAnn.feature_type);
                 return (
                   <>
-                    <line x1={xScale(mid)} y1={0} x2={xScale(mid)} y2={innerH} stroke="#444" strokeDasharray="3 3" />
-                    <polygon points={`${xScale(mid)-6},${innerH+10} ${xScale(mid)+6},${innerH+10} ${xScale(mid)},${innerH+2}`} fill="#000" />
-                    <text x={xScale(mid)} y={-2} textAnchor="middle">
-                      {displayGene(focal)} ({focalChimeraTotal})
+                    <line x1={xScale(midAbs)} y1={0} x2={xScale(midAbs)} y2={innerH} stroke="#444" strokeDasharray="3 3" />
+                    <polygon points={`${xScale(midAbs)-6},${innerH+10} ${xScale(midAbs)+6},${innerH+10} ${xScale(midAbs)},${innerH+2}`} fill="#000" />
+                    <text x={xScale(midAbs)} y={-2} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
+                      {disp.text} ({focalChimeraTotal})
                     </text>
                   </>
                 );
@@ -692,11 +744,16 @@ function ScatterPlot({
           })}
 
           {/* labels (gene names) */}
-          {labels.map((p, i) => (
-            <g key={i} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
-              <text x={6} y={-6}>{displayGene(p.partner)}</text>
-            </g>
-          ))}
+          {labels.map((p, i) => {
+            const disp = formatGeneName(p.partner, partners.find(q => q.partner === p.partner)?.type);
+            return (
+              <g key={i} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
+                <text x={6} y={-6} style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
+                  {disp.text}
+                </text>
+              </g>
+            );
+          })}
         </g>
       </svg>
     </div>

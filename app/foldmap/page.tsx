@@ -3,16 +3,22 @@
 import React, { useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 
+/* ---------------- Types ---------------- */
+type FeatureType =
+  | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
+
 type Annotation = {
   gene_name: string;
   start: number;
   end: number;
   strand?: "+" | "-" | string;
   chromosome?: string;
+  feature_type?: FeatureType; // <-- include feature type so we can format names
 };
 
 type Interaction = { c1: number; c2: number };
 
+/* ---------------- Utils ---------------- */
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
 }
@@ -71,6 +77,18 @@ function downloadText(filename: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
+const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+// Match globalMAP name rules
+function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
+  const t = (type || "CDS") as FeatureType;
+  if (t === "sRNA" || t === "ncRNA" || t === "sponge") {
+    return { text: cap1(name), italic: false }; // e.g., sroC -> SroC
+  }
+  // UTR/CDS/tRNA/rRNA/hkRNA stay as-is but italicized
+  return { text: name, italic: true };
+}
+
+/* ---------------- Parsing ---------------- */
 function parseAnnotationCSV(text: string): Annotation[] {
   const { data } = Papa.parse<any>(text, { header: false, dynamicTyping: true, skipEmptyLines: true });
   if (!data.length) return [];
@@ -90,6 +108,7 @@ function parseAnnotationCSV(text: string): Annotation[] {
         end: Number(r.end),
         strand: r.strand || r.Strand,
         chromosome: r.chromosome || r.Chromosome,
+        feature_type: r.feature_type, // pick up feature type when present
       }));
   } else {
     return (data as any[])
@@ -141,6 +160,7 @@ async function parseInteractionFiles(files: FileList | null): Promise<Interactio
   return all;
 }
 
+/* ---------------- Matrix builder ---------------- */
 function buildSelfMatrix(
   interactions: Interaction[],
   start: number,
@@ -196,6 +216,7 @@ function percentile(arr: number[], p: number) {
   return a[lo] * (1 - t) + a[hi] * t;
 }
 
+/* ---------------- Page ---------------- */
 export default function FoldMapPage() {
   const [ann, setAnn] = useState<Annotation[]>([]);
   const [ints, setInts] = useState<Interaction[]>([]);
@@ -267,6 +288,13 @@ export default function FoldMapPage() {
     setInts(arr);
   }
 
+  // Load a preset annotations CSV from /public
+  async function loadPresetAnno(path: string) {
+    const res = await fetch(path);
+    const text = await res.text();
+    setAnn(parseAnnotationCSV(text));
+  }
+
   function onSubmitGene(e: React.FormEvent) {
     e.preventDefault();
     setSelectedGene(inputGene); // commit selection
@@ -274,6 +302,7 @@ export default function FoldMapPage() {
 
   function exportMatrixSVG() {
     if (!geneRow || !matBundle) return;
+    const disp = formatGeneName(geneRow.gene_name, geneRow.feature_type);
     const mat = norm === "raw" ? matBundle.raw : matBundle.ice;
     const width = 680, height = 680;
     const pad = 44, x0 = pad, y0 = pad, W = width - pad * 2, H = height - pad * 2;
@@ -312,17 +341,19 @@ export default function FoldMapPage() {
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
       <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>
-      <text x="${x0}" y="${y0 - 10}" font-family="ui-sans-serif" font-size="12">${geneRow.gene_name} — ${norm.toUpperCase()} (bin ${matBundle.bin} nt, flank ${flank} nt)</text>
+      <text x="${x0}" y="${y0 - 10}" font-family="ui-sans-serif" font-size="12"${disp.italic ? ' font-style="italic"' : ""}>${disp.text}</text>
+      <text x="${x0 + 180}" y="${y0 - 10}" font-family="ui-sans-serif" font-size="12">— ${norm.toUpperCase()} (bin ${matBundle.bin} nt, flank ${flank} nt)</text>
       ${rects}
       ${overlay}
       <text x="${x0 + W / 2}" y="${height - 10}" text-anchor="middle" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
       <text transform="translate(16,${y0 + H / 2}) rotate(-90)" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
     </svg>`;
-    downloadText(`${geneRow.gene_name}_foldMAP_${norm}.svg`, svg);
+    downloadText(`${disp.text}_foldMAP_${norm}.svg`, svg);
   }
 
   function exportProfileSVG() {
     if (!geneRow || !longProfile) return;
+    const disp = formatGeneName(geneRow.gene_name, geneRow.feature_type);
     const width = 840, height = 300;
     const padL = 54, padR = 18, padT = 28, padB = 44;
     const innerW = width - padL - padR, innerH = height - padT - padB;
@@ -356,27 +387,30 @@ export default function FoldMapPage() {
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
       <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>
-      <text x="${padL}" y="${padT - 10}" font-family="ui-sans-serif" font-size="12">Long-range (≥ 5 kb) interaction profile — ${geneRow.gene_name}</text>
+      <text x="${padL}" y="${padT - 10}" font-family="ui-sans-serif" font-size="12"${disp.italic ? ' font-style="italic"' : ""}>Long-range (≥ 5 kb) interaction profile — ${disp.text}</text>
       ${bars}
       ${overlay}
       ${dots}
       <text x="${padL + innerW / 2}" y="${height - 12}" text-anchor="middle" font-size="11" fill="#6b7280">Window (5′ → 3′): flank — gene — flank</text>
       <text transform="translate(18,${padT + innerH / 2}) rotate(-90)" font-size="11" fill="#6b7280">Smoothed ligation events</text>
     </svg>`;
-    downloadText(`${geneRow.gene_name}_longrange_profile.svg`, svg);
+    downloadText(`${disp.text}_longrange_profile.svg`, svg);
   }
 
   function exportPeaksCSV() {
     if (!geneRow || !longProfile) return;
+    const disp = formatGeneName(geneRow.gene_name, geneRow.feature_type);
     const rows = [["Feature_Type", "Position_in_window(nt)", "Notes"]];
     longProfile.peaks.forEach((p) => rows.push(["Maxima (ssRNA)", String(p + 1), "long-range maxima"]));
-    downloadText(`${geneRow.gene_name}_longrange_maxima.csv`, rows.map((r) => r.join(",")).join("\n"));
+    downloadText(`${disp.text}_longrange_maxima.csv`, rows.map((r) => r.join(",")).join("\n"));
   }
 
   const dispMat = useMemo(() => {
     if (!matBundle) return undefined;
     return norm === "raw" ? matBundle.raw : matBundle.ice;
   }, [matBundle, norm]);
+
+  const dispGene = geneRow ? formatGeneName(geneRow.gene_name, geneRow.feature_type) : undefined;
 
   return (
     <div className="mx-auto max-w-7xl p-4">
@@ -387,13 +421,36 @@ export default function FoldMapPage() {
         <div className="col-span-12 lg:col-span-3 space-y-4">
           <section className="border rounded-2xl p-4">
             <div className="font-semibold mb-2">Data</div>
+
             <div className="text-xs text-gray-600">Annotation CSV</div>
-            <input ref={annRef} type="file" accept=".csv" onChange={onAnnFile} />
+            <div className="flex items-center gap-2 mb-2">
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                defaultValue=""
+                onChange={(e) => {
+                  const map: Record<string, string> = {
+                    "preset-ec": "/Anno_EC.csv",
+                    "preset-ss": "/Anno_SS.csv",
+                    "preset-mx": "/Anno_MX.csv",
+                    "preset-sa": "/Anno_SA.csv",
+                    "preset-bs": "/Anno_BS.csv",
+                  };
+                  const v = e.target.value;
+                  if (map[v]) loadPresetAnno(map[v]);
+                }}
+              >
+                <option value="" disabled>Select preset…</option>
+                <option value="preset-ec">Anno_EC.csv</option>
+                <option value="preset-ss">Anno_SS.csv</option>
+                <option value="preset-mx">Anno_MX.csv</option>
+                <option value="preset-sa">Anno_SA.csv</option>
+                <option value="preset-bs">Anno_BS.csv</option>
+              </select>
+              <input ref={annRef} type="file" accept=".csv" onChange={onAnnFile} />
+            </div>
+
             <div className="text-xs text-gray-600 mt-3">Chimeras (.bed / .csv)</div>
             <input ref={intRef} type="file" accept=".bed,.csv" multiple onChange={onIntsFile} />
-            <p className="text-[11px] text-gray-500 mt-2">
-              
-            </p>
           </section>
 
           <section className="border rounded-2xl p-4 space-y-3">
@@ -409,7 +466,13 @@ export default function FoldMapPage() {
             </form>
             <div className="text-xs text-gray-500">
               {geneRow ? (
-                <>Loaded: <span className="font-medium">{geneRow.gene_name}</span> — {geneRow.start}–{geneRow.end} ({(geneRow.strand || "+").toString()})</>
+                <>
+                  Loaded:{" "}
+                  <span className="font-medium" style={{ fontStyle: dispGene?.italic ? "italic" : "normal" }}>
+                    {dispGene?.text}
+                  </span>{" "}
+                  — {geneRow.start}–{geneRow.end} ({(geneRow.strand || "+").toString()})
+                </>
               ) : selectedGene ? (
                 <>No match for “{selectedGene}”.</>
               ) : (
@@ -478,7 +541,17 @@ export default function FoldMapPage() {
           {/* Self contact map */}
           <section className="border rounded-2xl p-3">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-sm text-gray-700">Intramolecular contact map {geneRow ? `— ${geneRow.gene_name}` : ""}</div>
+              <div className="text-sm text-gray-700">
+                Intramolecular contact map{" "}
+                {geneRow ? (
+                  <>
+                    —{" "}
+                    <span style={{ fontStyle: dispGene?.italic ? "italic" : "normal" }}>
+                      {dispGene?.text}
+                    </span>
+                  </>
+                ) : null}
+              </div>
               {matBundle && (
                 <div className="text-[11px] text-gray-500">bins: {matBundle.nBins} × {matBundle.nBins} (bin {matBundle.bin} nt, flank {flank} nt)</div>
               )}
@@ -541,7 +614,17 @@ export default function FoldMapPage() {
           {/* Long-range profile */}
           <section className="border rounded-2xl p-3">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-sm text-gray-700">Long-range (&gt; 5 kb) interaction profile {geneRow ? `— ${geneRow.gene_name}` : ""}</div>
+              <div className="text-sm text-gray-700">
+                Long-range (&gt; 5 kb) interaction profile{" "}
+                {geneRow ? (
+                  <>
+                    —{" "}
+                    <span style={{ fontStyle: dispGene?.italic ? "italic" : "normal" }}>
+                      {dispGene?.text}
+                    </span>
+                  </>
+                ) : null}
+              </div>
               {longProfile && <div className="text-[11px] text-gray-500">peaks: {longProfile.peaks.length} • window flank: {flank} nt</div>}
             </div>
 

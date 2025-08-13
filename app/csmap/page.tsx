@@ -298,7 +298,7 @@ export default function CsMapPage() {
 
         <div className="flex flex-col sm:flex-row gap-6">
           <label className="text-sm">
-            <div className="text-slate-700 mb-1">Pairs table CSV</div>
+            <div className="text-slate-700 mb-1">Interaction analysis CSV</div>
             <input ref={pairsRef} type="file" accept=".csv" onChange={onPairsFile} />
           </label>
           <label className="text-sm">

@@ -6,7 +6,7 @@ import Papa from "papaparse";
 
 // ---------- Types ----------
 type FeatureType =
-  | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | string;
+  | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
 
 type Annotation = {
   gene_name: string;
@@ -34,14 +34,24 @@ const FEATURE_COLORS: Record<FeatureType, string> = {
   sRNA:  "#A40194",
   sponge:"#F12C2C",
   tRNA:  "#82F778",
-  hkRNA: "#C4C5C5",
+  hkRNA: "#999999",
+  rRNA:  "#999999",
   CDS:   "#F78208",
   "5'UTR":"#76AAD7",
   "3'UTR":"#0C0C0C",
-  rRNA:  "#999999",
 };
 const cf = (s: string) => String(s || "").trim().toLowerCase();
-const baseName = (g: string) => (g.startsWith("5'") || g.startsWith("3'")) ? g.slice(2) : g;
+
+// ----- display helpers (match globalMAP rules) -----
+const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
+  const t = (type || "CDS") as FeatureType;
+  if (t === "sRNA" || t === "ncRNA" || t === "sponge") {
+    return { text: cap1(name), italic: false }; // e.g., sroC -> SroC
+  }
+  // UTRs/CDS/tRNA/rRNA/hkRNA: keep exact case, but italicize (e.g., 5'argT stays 5'argT in italics)
+  return { text: name, italic: true };
+}
 
 // ---------- CSV parsing ----------
 function parsePairsCSV(csv: string): Pair[] {
@@ -101,6 +111,7 @@ export default function CsMapPage() {
   const [pairs, setPairs] = useState<Pair[]>([]);
   const [anno, setAnno] = useState<Annotation[]>([]);
   const [genesInput, setGenesInput] = useState<string>("gcvB, cpxQ"); // example
+  const [sizeScaleFactor, setSizeScaleFactor] = useState<number>(1.0); // NEW: 0.1..2x
   const pairsRef = useRef<HTMLInputElement>(null);
   const annoRef = useRef<HTMLInputElement>(null);
 
@@ -122,6 +133,12 @@ export default function CsMapPage() {
     setAnno(parseAnnoCSV(text));
   }
 
+  async function loadPresetAnno(path: string) {
+    const res = await fetch(path);
+    const text = await res.text();
+    setAnno(parseAnnoCSV(text));
+  }
+
   // user list (case-insensitive)
   const geneList = useMemo(
     () => genesInput.split(/[, \n\t\r]+/).map((g) => g.trim()).filter(Boolean),
@@ -132,9 +149,9 @@ export default function CsMapPage() {
   const { dots, totals, warnings } = useMemo(() => {
     const warnings: string[] = [];
     const dots: { col: number; yT: number; r: number; stroke: string }[] = [];
-    const totals: { gene: string; total: number }[] = [];
+    const totals: { gene: string; total: number; type?: FeatureType }[] = [];
 
-    const COUNT_MIN = 10;  // fixed per your request
+    const COUNT_MIN = 10;  // fixed
     const DIST_MIN = 5000; // bp
     const OR_CAP = 5000;
     const LINTHRESH = 10;
@@ -150,8 +167,6 @@ export default function CsMapPage() {
       const annG = annoByCF.get(gCF);
       if (!annG) {
         warnings.push(`No annotation for ${gRaw}`);
-        totals.push({ gene: baseName(gRaw), total: 0 });
-        return;
       }
 
       // totals (prefer total_ref when gene is ref; totals when gene is target)
@@ -160,7 +175,7 @@ export default function CsMapPage() {
         if (cf(e.ref) === gCF && e.total_ref) { total = e.total_ref; break; }
         if (cf(e.target) === gCF && e.totals) { total = e.totals; break; }
       }
-      totals.push({ gene: baseName(gRaw), total: Math.max(0, Math.floor(total)) });
+      totals.push({ gene: gRaw, total: Math.max(0, Math.floor(total)), type: annG?.feature_type });
 
       // collect candidates for this gene (both directions)
       const cand: { pos: number; or: number; counts: number; type: FeatureType }[] = [];
@@ -174,10 +189,10 @@ export default function CsMapPage() {
         if (!annP) continue;
 
         const dist = Math.min(
-          Math.abs(annP.start - annG.end),
-          Math.abs(annP.end - annG.start),
-          Math.abs(annP.start - annG.start),
-          Math.abs(annP.end - annG.end)
+          Math.abs(annP.start - (annG?.end ?? annP.end)),
+          Math.abs(annP.end - (annG?.start ?? annP.start)),
+          Math.abs(annP.start - (annG?.start ?? annP.start)),
+          Math.abs(annP.end - (annG?.end ?? annP.end))
         );
 
         const counts = Number(e.counts) || 0;
@@ -212,14 +227,14 @@ export default function CsMapPage() {
 
       for (const p of peaks) {
         const y = Math.min(OR_CAP, p.or);
-        const yT = symlog(y);             // transformed y
-        const r = Math.sqrt(p.counts) * 1.5; // HALF the previous size
+        const yT = symlog(y);                             // transformed y
+        const r = (Math.sqrt(p.counts) * 1.5) * sizeScaleFactor; // √counts scaling * slider
         dots.push({ col, yT, r, stroke: FEATURE_COLORS[p.type] || "#F78208" });
       }
     });
 
     return { dots, totals, warnings };
-  }, [geneList, pairs, annoByCF]);
+  }, [geneList, pairs, annoByCF, sizeScaleFactor]);
 
   // ---------- Layout / scales ----------
   const W = Math.max(560, 200 * Math.max(1, geneList.length));
@@ -234,7 +249,7 @@ export default function CsMapPage() {
 
   // bar chart sizing + log10 y-axis with ticks
   const BAR_H = 340;
-  const bMargin = { top: 28, right: 40, bottom: 74, left: 64 }; // LEFT MARGIN for visible axis
+  const bMargin = { top: 28, right: 40, bottom: 74, left: 64 };
   const bInnerW = W - bMargin.left - bMargin.right;
   const bInnerH = BAR_H - bMargin.top - bMargin.bottom;
 
@@ -242,7 +257,6 @@ export default function CsMapPage() {
   const log10 = (v: number) => (v <= 0 ? 0 : Math.log10(v));
   const barY = (v: number) => bInnerH - (log10(v) / log10(tMax || 1)) * bInnerH;
 
-  // slimmer bars
   const barW = Math.min(18, Math.max(12, bInnerW / (geneList.length * 3)));
 
   // ticks for bar log axis: 1, 10, 100, ... up to tMax
@@ -266,7 +280,22 @@ export default function CsMapPage() {
           value={genesInput}
           onChange={(e) => setGenesInput(e.target.value)}
         />
+
+        {/* Circle size slider */}
+        <div className="flex items-center gap-2">
+          <div className="text-xs text-slate-700 whitespace-nowrap">Circle size ×{sizeScaleFactor.toFixed(1)}</div>
+          <input
+            type="range"
+            min={0.1}
+            max={2}
+            step={0.1}
+            value={sizeScaleFactor}
+            onChange={(e) => setSizeScaleFactor(Number(e.target.value))}
+          />
+        </div>
+
         <div className="flex-1" />
+
         <div className="flex flex-col sm:flex-row gap-6">
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Pairs table CSV</div>
@@ -274,7 +303,31 @@ export default function CsMapPage() {
           </label>
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Annotations CSV</div>
-            <input ref={annoRef} type="file" accept=".csv" onChange={onAnnoFile} />
+            <div className="flex items-center gap-2">
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                defaultValue=""
+                onChange={(e) => {
+                  const map: Record<string, string> = {
+                    "preset-ec": "/Anno_EC.csv",
+                    "preset-ss": "/Anno_SS.csv",
+                    "preset-mx": "/Anno_MX.csv",
+                    "preset-sa": "/Anno_SA.csv",
+                    "preset-bs": "/Anno_BS.csv",
+                  };
+                  const v = e.target.value;
+                  if (map[v]) loadPresetAnno(map[v]);
+                }}
+              >
+                <option value="" disabled>Select preset…</option>
+                <option value="preset-ec">Anno_EC.csv</option>
+                <option value="preset-ss">Anno_SS.csv</option>
+                <option value="preset-mx">Anno_MX.csv</option>
+                <option value="preset-sa">Anno_SA.csv</option>
+                <option value="preset-bs">Anno_BS.csv</option>
+              </select>
+              <input ref={annoRef} type="file" accept=".csv" onChange={onAnnoFile} />
+            </div>
           </label>
         </div>
       </div>
@@ -296,10 +349,14 @@ export default function CsMapPage() {
             <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
             {geneList.map((g, i) => {
               const cx = ((i + 0.5) / geneList.length) * innerW;
+              const annG = annoByCF.get(cf(g));
+              const disp = formatGeneName(g, annG?.feature_type);
               return (
                 <g key={i} transform={`translate(${cx},${innerH})`}>
                   <line y2={6} stroke="#222" />
-                  <text y={24} textAnchor="middle">{baseName(g.toLowerCase())}</text>
+                  <text y={24} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
+                    {disp.text}
+                  </text>
                 </g>
               );
             })}
@@ -329,21 +386,25 @@ export default function CsMapPage() {
           </g>
         </svg>
 
-        {/* Legend */}
+        {/* Legend (combined like globalMAP) */}
         <div className="px-4 pb-4">
           <div className="mt-2 flex flex-wrap gap-4 items-center">
             <span className="text-sm font-medium">Feature types</span>
-            {["CDS","5'UTR","3'UTR","ncRNA","sRNA","tRNA","rRNA","sponge","hkRNA"].map((k) => (
-              <span key={k} className="inline-flex items-center gap-2 text-xs">
+            {[
+              { key: "CDS", color: FEATURE_COLORS.CDS, label: "CDS" },
+              { key: "5'UTR", color: FEATURE_COLORS["5'UTR"], label: "5'UTR" },
+              { key: "3'UTR", color: FEATURE_COLORS["3'UTR"], label: "3'UTR" },
+              { key: "sRNA/ncRNA", color: FEATURE_COLORS.sRNA, label: "sRNA/ncRNA" },
+              { key: "tRNA", color: FEATURE_COLORS.tRNA, label: "tRNA" },
+              { key: "rRNA/hkRNA", color: FEATURE_COLORS.rRNA, label: "rRNA/hkRNA" },
+              { key: "sponge", color: FEATURE_COLORS.sponge, label: "Sponge" },
+            ].map((item) => (
+              <span key={item.key} className="inline-flex items-center gap-2 text-xs">
                 <span
                   className="inline-block w-3 h-3 rounded-full border"
-                  style={{
-                    background: "#fff",
-                    borderColor: FEATURE_COLORS[k as FeatureType] || "#F78208",
-                    boxShadow: `inset 0 0 0 2px ${FEATURE_COLORS[k as FeatureType] || "#F78208"}`
-                  }}
+                  style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}
                 />
-                {k}
+                {item.label}
               </span>
             ))}
             <span className="ml-4 text-xs text-slate-500">Circle size ∝ √counts</span>
@@ -383,11 +444,12 @@ export default function CsMapPage() {
               const x = (i + 0.5) * (bInnerW / Math.max(1, totals.length)) - barW / 2;
               const y = barY(Math.max(1, t.total));
               const h = bInnerH - y;
+              const disp = formatGeneName(t.gene, t.type);
               return (
                 <g key={i}>
                   <rect x={x} y={y} width={barW} height={h} fill="#93c5fd" stroke="#60a5fa" />
-                  <text x={x + barW / 2} y={bInnerH + 18} textAnchor="middle">
-                    {t.gene.toLowerCase()}
+                  <text x={x + barW / 2} y={bInnerH + 18} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
+                    {disp.text}
                   </text>
                 </g>
               );

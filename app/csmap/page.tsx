@@ -3,6 +3,7 @@
 
 import React, { useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
+import { PRESETS } from "@/lib/presets";
 
 // ---------- Types ----------
 type FeatureType =
@@ -111,7 +112,12 @@ export default function CsMapPage() {
   const [pairs, setPairs] = useState<Pair[]>([]);
   const [anno, setAnno] = useState<Annotation[]>([]);
   const [genesInput, setGenesInput] = useState<string>("gcvB, cpxQ"); // example
-  const [sizeScaleFactor, setSizeScaleFactor] = useState<number>(1.0); // NEW: 0.1..2x
+  const [sizeScaleFactor, setSizeScaleFactor] = useState<number>(1.0); // 0.1..2x
+
+  // show loaded names like globalMAP
+  const [loadedPairsName, setLoadedPairsName] = useState<string | null>(null);
+  const [loadedAnnoName, setLoadedAnnoName] = useState<string | null>(null);
+
   const pairsRef = useRef<HTMLInputElement>(null);
   const annoRef = useRef<HTMLInputElement>(null);
 
@@ -126,17 +132,28 @@ export default function CsMapPage() {
     const f = e.target.files?.[0]; if (!f) return;
     const text = await f.text();
     setPairs(parsePairsCSV(text));
+    setLoadedPairsName(f.name);
   }
   async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
     const text = await f.text();
     setAnno(parseAnnoCSV(text));
+    setLoadedAnnoName(f.name);
   }
 
-  async function loadPresetAnno(path: string) {
+  async function loadPresetAnno(path: string, label?: string) {
     const res = await fetch(path);
     const text = await res.text();
     setAnno(parseAnnoCSV(text));
+    if (label) setLoadedAnnoName(label);
+  }
+
+  // NEW: load interactions from shared presets (Vercel Blob)
+  async function loadPairsFromURL(url: string) {
+    const res = await fetch(url);
+    const text = await res.text();
+    setPairs(parsePairsCSV(text));
+    setLoadedPairsName(new URL(url).pathname.split("/").pop() || "interaction.csv");
   }
 
   // user list (case-insensitive)
@@ -297,10 +314,33 @@ export default function CsMapPage() {
         <div className="flex-1" />
 
         <div className="flex flex-col sm:flex-row gap-6">
+          {/* Interaction analysis CSV: preset dropdown + custom file button */}
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Interaction analysis CSV</div>
-            <input ref={pairsRef} type="file" accept=".csv" onChange={onPairsFile} />
+            <div className="flex items-center gap-2">
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                defaultValue=""
+                onChange={(e) => { const u = e.target.value; if (u) loadPairsFromURL(u); }}
+              >
+                <option value="" disabled>Select preset…</option>
+                {PRESETS.interactions.map(p => (
+                  <option key={p.url} value={p.url}>{p.label}</option>
+                ))}
+              </select>
+              <input ref={pairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
+              <button
+                className="border rounded px-3 py-1"
+                type="button"
+                onClick={() => pairsRef.current?.click()}
+              >
+                Choose File
+              </button>
+            </div>
+            <div className="text-xs text-slate-500 mt-1">{loadedPairsName || "(none loaded)"}</div>
           </label>
+
+          {/* Annotations CSV: preset dropdown + custom file button */}
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Annotations CSV</div>
             <div className="flex items-center gap-2">
@@ -316,7 +356,7 @@ export default function CsMapPage() {
                     "preset-bs": "/Anno_BS.csv",
                   };
                   const v = e.target.value;
-                  if (map[v]) loadPresetAnno(map[v]);
+                  if (map[v]) loadPresetAnno(map[v], map[v].slice(1));
                 }}
               >
                 <option value="" disabled>Select preset…</option>
@@ -326,8 +366,16 @@ export default function CsMapPage() {
                 <option value="preset-sa">Anno_SA.csv</option>
                 <option value="preset-bs">Anno_BS.csv</option>
               </select>
-              <input ref={annoRef} type="file" accept=".csv" onChange={onAnnoFile} />
+              <input ref={annoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
+              <button
+                className="border rounded px-3 py-1"
+                type="button"
+                onClick={() => annoRef.current?.click()}
+              >
+                Choose File
+              </button>
             </div>
+            <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(none loaded)"}</div>
           </label>
         </div>
       </div>
@@ -424,7 +472,7 @@ export default function CsMapPage() {
           <defs>
             <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style>
           </defs>
-          <g transform={`translate(${bMargin.left},${bMargin.top})`}>
+        <g transform={`translate(${bMargin.left},${bMargin.top})`}>
             {/* axes + grid */}
             <line x1={0} y1={bInnerH} x2={bInnerW} y2={bInnerH} stroke="#222" />
             {barTicks.map((v, i) => {

@@ -157,6 +157,8 @@ const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
   return { label: ft, italic: false };
 };
 
+type ExcludeGroup = { label: string; types: FeatureType[] };
+
 export default function Page() {
   const [data, setData] = useState(() => simulateData(500));
   const [focal, setFocal] = useState<string>("srna1");
@@ -164,6 +166,7 @@ export default function Page() {
   const [minDistance, setMinDistance] = useState(5000);
   const [yCap, setYCap] = useState(5000);
   const [labelThreshold, setLabelThreshold] = useState(50);
+  const [sizeScaleFactor, setSizeScaleFactor] = useState(1); // NEW: circle size scale
   const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["tRNA"]);
   const [query, setQuery] = useState("");
   const [highlightQuery, setHighlightQuery] = useState("");
@@ -328,6 +331,33 @@ export default function Page() {
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
 
+  // Exclude groups (hkRNA/rRNA together, sRNA/ncRNA together)
+  const EXCLUDE_GROUPS: ExcludeGroup[] = [
+    { label: "tRNA", types: ["tRNA"] },
+    { label: "5'UTR", types: ["5'UTR"] },
+    { label: "3'UTR", types: ["3'UTR"] },
+    { label: "CDS", types: ["CDS"] },
+    { label: "sponge", types: ["sponge"] },
+    { label: "sRNA/ncRNA", types: ["sRNA", "ncRNA"] },
+    { label: "hkRNA/rRNA", types: ["hkRNA", "rRNA"] },
+  ];
+
+  const isGroupActive = (types: FeatureType[]) => types.every(t => excludeTypes.includes(t));
+  const toggleGroup = (types: FeatureType[]) => {
+    setExcludeTypes(prev => {
+      const active = types.every(t => prev.includes(t));
+      if (active) {
+        // remove all
+        return prev.filter(t => !types.includes(t));
+      } else {
+        // add all (dedupe)
+        const s = new Set(prev);
+        types.forEach(t => s.add(t));
+        return Array.from(s);
+      }
+    });
+  };
+
   function downloadSVG() {
     const el = document.getElementById("scatter-svg") as SVGSVGElement | null;
     if (!el) return;
@@ -432,25 +462,31 @@ export default function Page() {
               className="w-full"
             />
 
+            {/* NEW: circle size scale */}
+            <label className="text-xs text-gray-600">Circle size scale: ×{sizeScaleFactor.toFixed(1)}</label>
+            <input
+              type="range"
+              min={0.5}
+              max={3}
+              step={0.1}
+              value={sizeScaleFactor}
+              onChange={e => setSizeScaleFactor(Number(e.target.value))}
+              className="w-full"
+            />
+
             <div className="text-xs text-gray-700">
               Exclude types:
               <div className="mt-1 flex flex-wrap gap-1">
-                {["tRNA", "hkRNA", "5'UTR", "3'UTR", "CDS", "sponge"].map(ft => {
-                  const active = excludeTypes.includes(ft as FeatureType);
+                {EXCLUDE_GROUPS.map(g => {
+                  const active = isGroupActive(g.types);
                   return (
                     <button
-                      key={ft}
+                      key={g.label}
                       type="button"
                       className={`px-2 py-1 rounded border ${active ? "bg-gray-200" : "bg-white"}`}
-                      onClick={() =>
-                        setExcludeTypes(prev =>
-                          prev.includes(ft as FeatureType)
-                            ? prev.filter(x => x !== ft)
-                            : [...prev, ft as FeatureType]
-                        )
-                      }
+                      onClick={() => toggleGroup(g.types)}
                     >
-                      {ft}
+                      {g.label}
                     </button>
                   );
                 })}
@@ -469,8 +505,16 @@ export default function Page() {
               </button>
             </div>
 
-            <div className="text-xs text-gray-600">Pairs table CSV</div>
-            <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} />
+            <div className="text-xs text-gray-600">Interaction analysis CSV</div>
+            {/* custom file button to avoid inline filename */}
+            <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
+            <button
+              className="border rounded px-3 py-1"
+              onClick={() => filePairsRef.current?.click()}
+              type="button"
+            >
+              Choose File
+            </button>
             <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
 
             <div className="text-xs text-gray-600 pt-2 flex items-center gap-2">
@@ -498,11 +542,22 @@ export default function Page() {
                 <option value="preset-bs">Anno_BS.csv</option>
               </select>
             </div>
-            <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} />
+            {/* custom file button to avoid inline filename */}
+            <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
+            <button
+              className="border rounded px-3 py-1"
+              onClick={() => fileAnnoRef.current?.click()}
+              type="button"
+            >
+              Choose File
+            </button>
             <div className="text-xs text-gray-500">{loadedAnnoName || "(using simulated annotations)"}</div>
-            <p className="text-[11px] text-gray-500 mt-2">
-              Headers — Pairs: ref,target,counts,odds_ratio,… | Annotations: gene_name,start,end,feature_type,strand,chromosome
-            </p>
+
+            <div className="text-[11px] text-gray-600 mt-3 space-y-1">
+              <div><span className="font-semibold">Headers —</span></div>
+              <div><span className="font-medium">Interactions CSV:</span> <code>ref, target, counts, odds_ratio, …</code></div>
+              <div><span className="font-medium">Annotations CSV:</span> <code>gene_name, start, end, feature_type, strand, chromosome</code></div>
+            </div>
           </section>
         </div>
 
@@ -520,6 +575,7 @@ export default function Page() {
               yTicks={yTicks}
               labelThreshold={labelThreshold}
               highlightSet={highlightSet}
+              sizeScaleFactor={sizeScaleFactor}
               onClickPartner={(name) => setFocal(name)}
             />
 
@@ -550,7 +606,10 @@ export default function Page() {
             <div className="flex justify-between items-center mb-3">
               <div className="font-semibold">
                 Partners for{" "}
-                <span className="text-blue-600" style={{ fontStyle: formatGeneName(focal, geneIndex[focal]?.feature_type).italic ? "italic" : "normal" }}>
+                <span
+                  className="text-blue-600"
+                  style={{ fontStyle: formatGeneName(focal, geneIndex[focal]?.feature_type).italic ? "italic" : "normal" }}
+                >
                   {formatGeneName(focal, geneIndex[focal]?.feature_type).text}
                 </span>{" "}
                 {focalAnn && (
@@ -633,6 +692,7 @@ function ScatterPlot({
   yTicks,
   labelThreshold,
   highlightSet,
+  sizeScaleFactor,
   onClickPartner,
 }: {
   focal: string;
@@ -645,6 +705,7 @@ function ScatterPlot({
   yTicks: number[];
   labelThreshold: number;
   highlightSet: Set<string>;
+  sizeScaleFactor: number;
   onClickPartner: (gene: string) => void;
 }) {
   const width = 900;
@@ -660,7 +721,7 @@ function ScatterPlot({
     const tMax = symlog(yCap, 10, 10);
     return innerH - (t / tMax) * innerH;
   };
-  const sizeScale = (c: number) => Math.sqrt(c) * 2 + 4;
+  const sizeScale = (c: number) => (Math.sqrt(c) * 2 + 4) * sizeScaleFactor; // √counts scaling with user factor
 
   const sorted = [...partners].sort((a, b) => b.rawY - a.rawY);
   const placed: { x: number; y: number }[] = [];
@@ -736,7 +797,6 @@ function ScatterPlot({
           {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => {
             const highlighted = highlightSet.has(p.partner);
             const face = highlighted ? "#FFEB3B" : "#FFFFFF";
-            const disp = formatGeneName(p.partner, p.type);
             return (
               <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
                 <circle
@@ -748,7 +808,6 @@ function ScatterPlot({
                   onClick={() => onClickPartner(p.partner)}
                 />
                 <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.12} />
-                {/* Optional: labels are handled below to avoid overplotting */}
               </g>
             );
           })}

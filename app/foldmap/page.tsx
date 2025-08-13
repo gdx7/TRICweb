@@ -1,7 +1,9 @@
+// app/foldmap/page.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
 import Papa from "papaparse";
+import { PRESETS } from "@/lib/presets"; // <-- NEW: shared presets import
 
 /* ---------------- Types ---------------- */
 type FeatureType =
@@ -92,26 +94,32 @@ function parseAnnotationCSV(text: string): Annotation[] {
       }));
   }
 }
+
+// Robust text parser for a single chimera file (CSV/TSV or BED-like)
+function parseInteractionText(text: string): Interaction[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (!lines.length) return [];
+  const out: Interaction[] = [];
+  const body = lines.filter(l => !/^track|^browser/i.test(l)); // drop UCSC headers if any
+  for (const ln of body) {
+    const t = ln.split(/\t|,|\s+/).filter(Boolean);
+    if (t.length >= 3 && !isNaN(Number(t[1])) && !isNaN(Number(t[2]))) {
+      // BED-like: chrom, start, end
+      out.push({ c1: Number(t[1]), c2: Number(t[2]) });
+    } else if (t.length >= 2 && !isNaN(Number(t[0])) && !isNaN(Number(t[1]))) {
+      // plain 2-col
+      out.push({ c1: Number(t[0]), c2: Number(t[1]) });
+    }
+  }
+  return out;
+}
+
 async function parseInteractionFiles(files: FileList | null): Promise<Interaction[]> {
   if (!files || files.length === 0) return [];
   const all: Interaction[] = [];
   for (const f of Array.from(files)) {
     const text = await f.text();
-    const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (!lines.length) continue;
-    const firstLine = lines[0];
-    const isCSV = f.name.toLowerCase().endsWith(".csv");
-    const isBed = f.name.toLowerCase().endsWith(".bed");
-    if (isCSV) {
-      const { data } = Papa.parse<any>(text, { header: false, dynamicTyping: true, skipEmptyLines: true });
-      for (const r of data as any[]) { const c1 = Number(r[0]); const c2 = Number(r[1]); if (Number.isFinite(c1) && Number.isFinite(c2)) all.push({ c1, c2 }); }
-    } else if (isBed) {
-      const skipHeader = firstLine.startsWith("track") || firstLine.startsWith("browser") ? 1 : 0;
-      const body = lines.slice(skipHeader);
-      for (const ln of body) { const t = ln.split(/\t|,/); if (t.length < 3) continue; const c1 = Number(t[1]); const c2 = Number(t[2]); if (Number.isFinite(c1) && Number.isFinite(c2)) all.push({ c1, c2 }); }
-    } else {
-      for (const ln of lines) { const t = ln.split(/\t|,/); if (t.length < 2) continue; const c1 = Number(t[0]); const c2 = Number(t[1]); if (Number.isFinite(c1) && Number.isFinite(c2)) all.push({ c1, c2 }); }
-    }
+    all.push(...parseInteractionText(text));
   }
   return all;
 }
@@ -239,6 +247,15 @@ export default function FoldMapPage() {
     setAnn(parseAnnotationCSV(text));
     const base = path.split("/").pop() || path;
     setAnnFileName(base);
+  }
+
+  // NEW: load a chimera/contacts file from a URL (e.g., Vercel Blob)
+  async function loadChimerasFromURL(url: string, label?: string) {
+    const res = await fetch(url);
+    const text = await res.text();
+    const parsed = parseInteractionText(text);
+    setInts(parsed);
+    setChimeraFilesLabel(label || (new URL(url).pathname.split("/").pop() ?? "contacts"));
   }
 
   function onSubmitGene(e: React.FormEvent) { e.preventDefault(); setSelectedGene(inputGene); }
@@ -391,6 +408,24 @@ export default function FoldMapPage() {
 
             <div className="text-xs text-gray-600 mt-3">Chimeras (.bed / .csv)</div>
             <div className="flex items-center gap-2">
+              {/* NEW: preset dropdown from shared presets (Vercel Blob, etc.) */}
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                defaultValue=""
+                onChange={(e) => {
+                  const url = e.target.value;
+                  if (!url) return;
+                  const item = PRESETS.contacts.find(p => p.url === url);
+                  loadChimerasFromURL(url, item?.label);
+                }}
+              >
+                <option value="" disabled>Select preset…</option>
+                {PRESETS.contacts.map((p) => (
+                  <option key={p.url} value={p.url}>{p.label}</option>
+                ))}
+              </select>
+
+              {/* Custom "Choose Files" button + hidden input (multiple) */}
               <label htmlFor="chimera-files" className="border rounded px-3 py-1 bg-white hover:bg-slate-50 cursor-pointer text-sm">
                 Choose Files
               </label>

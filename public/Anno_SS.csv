@@ -1,3 +1,4 @@
+gene_name,start,end,feature_type,strand,locus_tag,chromosome
 5'dnaA,1,1918,5'UTR,+,PSJM300_00005,CP003725.1
 dnaA,459,1919,CDS,+,PSJM300_00005,CP003725.1
 PSJM300_00010,1920,3074,CDS,+,PSJM300_00010,CP003725.1

@@ -1,7 +1,9 @@
+// app/pairmap/page.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import Papa from "papaparse";
+import { PRESETS } from "@/lib/presets";
 
 /* ---------------- Types ---------------- */
 type FeatureType =
@@ -19,6 +21,7 @@ type Annotation = {
 /* ---------------- Helpers ---------------- */
 const cf = (s: string) => String(s || "").trim().toLowerCase(); // case-insensitive key
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
 // Match globalMAP name rules:
 function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
   const t = (type || "CDS") as FeatureType;
@@ -63,13 +66,15 @@ function parseAnnoCSV(csv: string): Annotation[] {
     }));
 }
 
-// accepts .bed (chrom, pos1, pos2) or simple 2-col CSV
-async function parseContacts(file: File): Promise<Array<[number, number]>> {
-  const txt = await file.text();
+// Parse contacts from raw text (supports .bed, 2-col CSV/TSV)
+function parseContactsText(txt: string): Array<[number, number]> {
   const lines = txt.split(/\r?\n/).filter(Boolean);
   const rows: Array<[number, number]> = [];
-  for (const line of lines) {
+  // skip UCSC BED headers if present
+  const body = lines.filter(l => !/^track|^browser/i.test(l));
+  for (const line of body) {
     const parts = line.split(/\s+|,/).filter(Boolean);
+    // BED-like: chrom, start, end
     if (parts.length >= 3 && !isNaN(Number(parts[1])) && !isNaN(Number(parts[2]))) {
       rows.push([Number(parts[1]), Number(parts[2])]);
     } else if (parts.length >= 2 && !isNaN(Number(parts[0])) && !isNaN(Number(parts[1]))) {
@@ -83,6 +88,10 @@ async function parseContacts(file: File): Promise<Array<[number, number]>> {
 export default function PairMapPage() {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [contacts, setContacts] = useState<Array<[number, number]>>([]);
+
+  // filenames (for display under controls)
+  const [loadedAnnoName, setLoadedAnnoName] = useState<string | null>(null);
+  const [loadedContactsName, setLoadedContactsName] = useState<string | null>(null);
 
   // Inputs (case-insensitive under the hood; display original casing)
   const [primaryRNA, setPrimaryRNA] = useState("gcvB");
@@ -114,16 +123,31 @@ export default function PairMapPage() {
 
   async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    setAnnotations(parseAnnoCSV(await f.text()));
+    const txt = await f.text();
+    setAnnotations(parseAnnoCSV(txt));
+    setLoadedAnnoName(f.name);
   }
+
   async function onContactsFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    setContacts(await parseContacts(f));
+    const txt = await f.text();
+    setContacts(parseContactsText(txt));
+    setLoadedContactsName(f.name);
   }
-  async function loadPresetAnno(path: string) {
+
+  async function loadPresetAnno(path: string, label?: string) {
     const res = await fetch(path);
     const text = await res.text();
     setAnnotations(parseAnnoCSV(text));
+    if (label) setLoadedAnnoName(label);
+  }
+
+  // NEW: load chimera/contacts from shared preset URL (Vercel Blob)
+  async function loadContactsFromURL(url: string) {
+    const res = await fetch(url);
+    const text = await res.text();
+    setContacts(parseContactsText(text));
+    setLoadedContactsName(new URL(url).pathname.split("/").pop() || "contacts.bed");
   }
 
   // Build one heatmap per X-gene
@@ -182,7 +206,6 @@ export default function PairMapPage() {
     const hues = [0, 120, 220, 30, 280, 0]; // red, green, blue, orange, purple, grey
     const hue = hues[paletteIndex]!;
     if (paletteIndex === 5) {
-      // greys
       const g = Math.round(230 - t * 200);
       return `rgb(${g},${g},${g})`;
     }
@@ -252,6 +275,7 @@ export default function PairMapPage() {
 
         <div className="flex-1" />
         <div className="flex gap-6 items-center">
+          {/* Annotations: preset + file */}
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Annotations CSV</div>
             <div className="flex items-center gap-2">
@@ -267,7 +291,7 @@ export default function PairMapPage() {
                     "preset-bs": "/Anno_BS.csv",
                   };
                   const v = e.target.value;
-                  if (map[v]) loadPresetAnno(map[v]);
+                  if (map[v]) loadPresetAnno(map[v], map[v].slice(1));
                 }}
               >
                 <option value="" disabled>Select preset…</option>
@@ -279,10 +303,26 @@ export default function PairMapPage() {
               </select>
               <input type="file" accept=".csv" onChange={onAnnoFile}/>
             </div>
+            <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(none loaded)"}</div>
           </label>
+
+          {/* Chimeras: NEW preset (Vercel Blob) + file */}
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Chimeras (.bed or .csv)</div>
-            <input type="file" accept=".bed,.csv" onChange={onContactsFile}/>
+            <div className="flex items-center gap-2">
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                defaultValue=""
+                onChange={(e) => { const u = e.target.value; if (u) loadContactsFromURL(u); }}
+              >
+                <option value="" disabled>Select preset…</option>
+                {PRESETS.contacts.map(p => (
+                  <option key={p.url} value={p.url}>{p.label}</option>
+                ))}
+              </select>
+              <input type="file" accept=".bed,.csv" onChange={onContactsFile}/>
+            </div>
+            <div className="text-xs text-slate-500 mt-1">{loadedContactsName || "(none loaded)"}</div>
           </label>
         </div>
       </div>
@@ -303,8 +343,7 @@ export default function PairMapPage() {
             const cellW = cw / m.bins_x;
             const cellH = ch / m.bins_y;
 
-            // helper to place Y (invert axis: 0 bin appears at bottom)
-            const yPix = (bin: number) => 10 + (m.bins_y - 1 - bin) * cellH;
+            const yPix = (bin: number) => 10 + (m.bins_y - 1 - bin) * cellH; // invert Y
 
             const dispX = formatGeneName(m.label, m.typeX);
 
@@ -327,7 +366,7 @@ export default function PairMapPage() {
                   ))
                 )}
 
-                {/* X ticks: -flankX, start, end, +flankX */}
+                {/* X ticks */}
                 {(() => {
                   const gx_len = m.x_len_bins;
                   const gx_s = Math.floor(flankX / binSize);
@@ -342,7 +381,7 @@ export default function PairMapPage() {
                   ));
                 })()}
 
-                {/* Y ticks: -flankY, start, end, +flankY  (positions inverted) */}
+                {/* Y ticks */}
                 {(() => {
                   const gy_len = m.y_len_bins;
                   const gy_s = Math.floor(flankY / binSize);

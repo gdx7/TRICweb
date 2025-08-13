@@ -516,9 +516,9 @@ export default function Page() {
             </div>
 
             <div className="text-xs text-gray-600">Interaction analysis CSV</div>
-            <div className="flex items-center gap-2">
+            <div className="mb-2">
               <select
-                className="border rounded px-2 py-1 text-xs"
+                className="border rounded px-2 py-1 text-xs w-full"
                 defaultValue=""
                 onChange={(e) => { const u = e.target.value; if (u) loadPairsFromURL(u); }}
               >
@@ -527,16 +527,20 @@ export default function Page() {
                   <option key={p.url} value={p.url}>{p.label}</option>
                 ))}
               </select>
-              {/* custom file button to avoid inline filename */}
+            </div>
+            <div>
               <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
               <button
-                className="border rounded px-3 py-1"
+                className="border rounded px-3 py-1 w-full"
                 onClick={() => filePairsRef.current?.click()}
                 type="button"
               >
                 Choose File
               </button>
             </div>
+            
+            <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
+
             <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
 
             <div className="text-xs text-gray-600 pt-2 flex items-center gap-2">

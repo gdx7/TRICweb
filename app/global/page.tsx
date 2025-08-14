@@ -701,9 +701,33 @@ export default function Page() {
           </section>
         </div>
       </main>
+
+      {/* Help / quick guide (appears below the GlobalMAP UI) */}
+      <section className="mx-auto max-w-7xl p-4">
+        <div className="border rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-semibold">GlobalMAP quick guide</div>
+            <a
+              href="/GlobalHelp.png"
+              download
+              className="text-xs text-blue-600 hover:underline"
+            >
+              Download PNG
+            </a>
+          </div>
+
+          <img
+            src="/GlobalHelp.png"
+            alt="Annotated GlobalMAP screenshot showing search, filters, feature types, axes, highlighting, and labels."
+            loading="lazy"
+            className="mt-2 w-full h-auto rounded-lg border"
+          />
+        </div>
+      </section>
     </div>
   );
 }
+
 
 function ScatterPlot({
   focal,

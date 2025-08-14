@@ -414,6 +414,29 @@ export default function PairMapPage() {
           Upload annotations (via dropdown or file) and ensure the primary RNA exists (names are case-insensitive).
         </div>
       )}
+      {/* Help / quick guide for pairMAP */}
+      <section className="mx-auto max-w-7xl p-4">
+        <div className="border rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-semibold">pairMAP quick guide</div>
+            <a
+              href="/PairHelp.png"
+              download
+              className="text-xs text-blue-600 hover:underline"
+            >
+              Download PNG
+            </a>
+          </div>
+
+          <img
+            src="/PairHelp.png"
+            alt="Annotated pairMAP screenshot with example plots and TRIC-seq workflow."
+            loading="lazy"
+            className="mt-2 w-full h-auto rounded-lg border"
+          />
+        </div>
+      </section>
     </div>
   );
 }
+

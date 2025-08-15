@@ -41,9 +41,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="https://www.drna.nl" target="_blank" rel="noreferrer" className="opacity-90 hover:opacity-100">
                 <img src="/drna-logo.png" alt="dRNA Lab logo" className="h-14 w-auto" />
               </a>
-              <img src="/sils-logo.png" alt="SILS logo" className="h-14 w-auto opacity-90" />
+              <a href="https://sils.uva.nl/" target="_blank" rel="noreferrer" className="opacity-90 hover:opacity-100">
+                <img src="/sils-logo.png" alt="SILS logo" className="h-14 w-auto" />
+              </a>
             </div>
-            <div className="text-sm text-slate-500">
+            <div className="text-sm text-slate-500 text-center">
               © 2025{" "}
               <a
                 className="italic no-underline hover:text-slate-700"
@@ -52,6 +54,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 rel="noreferrer"
               >
                 www.drna.nl
+              </a>{" "}
+              @{" "}
+              <a
+                href="https://sils.uva.nl/"
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-slate-700"
+              >
+                SILS
+              </a>
+              ,{" "}
+              <a
+                href="https://www.uva.nl/en"
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-slate-700"
+              >
+                UvA
               </a>{" "}
               — Open access:{" "}
               <a href="https://opensource.org/licenses/MIT" target="_blank" rel="noreferrer">

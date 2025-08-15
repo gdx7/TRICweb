@@ -44,6 +44,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="https://sils.uva.nl/" target="_blank" rel="noreferrer" className="opacity-90 hover:opacity-100">
                 <img src="/sils-logo.png" alt="SILS logo" className="h-14 w-auto" />
               </a>
+              <a href="https://www.nwo.nl/en" target="_blank" rel="noreferrer" className="opacity-90 hover:opacity-100">
+                <img src="/NWO-logo.png" alt="NWO logo" className="h-14 w-auto" />
+              </a>
             </div>
             <div className="text-sm text-slate-500 text-center">
               © 2025{" "}
@@ -72,8 +75,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 className="hover:text-slate-700"
               >
                 UvA
-              </a>{" "}
-              — Open access:{" "}
+              </a>
+            </div>
+            <div className="text-sm text-slate-500 text-center">
+              Open access:{" "}
               <a href="https://opensource.org/licenses/MIT" target="_blank" rel="noreferrer">
                 MIT License
               </a>{" "}

@@ -28,6 +28,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/csmap">csMAP</Link>
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/pairmap">pairMAP</Link>
               <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/foldmap">foldMAP</Link>
+              {/* NEW: Help (italic) */}
+              <Link className="px-3 py-1 rounded hover:bg-slate-100 italic" href="/help">Help</Link>
             </nav>
           </div>
         </header>

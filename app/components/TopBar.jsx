@@ -1,13 +1,10 @@
-// app/components/TopBar.tsx
 "use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo } from "react";
 
-type NavItem = { href: string; label: string };
-
-const navItems: NavItem[] = [
+const navItems = [
   { href: "/globalmap", label: "globalMAP" },
   { href: "/csmap", label: "csMAP" },
   { href: "/pairmap", label: "pairMAP" },
@@ -32,7 +29,7 @@ export default function TopBar() {
     <header role="banner" className="topbar">
       <div className="wrap">
         <Link href="/" className="brand" aria-label="TRIC-seq Explorer Home">
-          TRIC‑seq Explorer
+          TRIC-seq Explorer
         </Link>
 
         <nav aria-label="Primary" className="nav">

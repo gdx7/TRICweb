@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 
-/* ---------------- Types ---------------- */
 type FeatureType =
   | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
 
@@ -17,7 +16,6 @@ type Annotation = {
   chromosome?: string;
 };
 
-/* ---------------- Helpers ---------------- */
 const cf = (s: string) => String(s || "").trim().toLowerCase();
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
@@ -45,8 +43,6 @@ function exportSVG(svgId: string, name: string) {
   a.click();
   URL.revokeObjectURL(url);
 }
-
-/* ---------------- Parsing ---------------- */
 function parseAnnoCSV(csv: string): Annotation[] {
   const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
   return (data as any[])
@@ -60,7 +56,6 @@ function parseAnnoCSV(csv: string): Annotation[] {
       chromosome: r.chromosome,
     }));
 }
-// Parse contacts from text (.bed or 2-col)
 function parseContactsText(txt: string): Array<[number, number]> {
   const lines = txt.split(/\r?\n/).filter(Boolean);
   const rows: Array<[number, number]> = [];
@@ -76,72 +71,49 @@ function parseContactsText(txt: string): Array<[number, number]> {
   return rows;
 }
 
-/* ---------------- Very small, fast demo ---------------- */
-function demoAnnotations(): Annotation[] {
-  // few genes + a primary sRNA
-  const out: Annotation[] = [
-    { gene_name: "srna1", start: 10000, end: 10180, feature_type: "sRNA", strand: "+" },
-    { gene_name: "gene8", start: 30000, end: 30600, feature_type: "CDS", strand: "+" },
-    { gene_name: "gene12", start: 50000, end: 50800, feature_type: "CDS", strand: "-" },
-    { gene_name: "gene14", start: 65000, end: 65900, feature_type: "CDS", strand: "+" },
-    { gene_name: "gene20", start: 90000, end: 90900, feature_type: "CDS", strand: "-" },
+/** Tiny demo dataset (fast): primary srna1 vs gene5,gene12 with clear hotspots */
+function demoPairData() {
+  const ann: Annotation[] = [
+    { gene_name: "srna1", start: 10000, end: 10110, strand: "+", chromosome: "chr", feature_type: "sRNA" },
+    { gene_name: "gene5", start: 50000, end: 50650, strand: "+", chromosome: "chr", feature_type: "CDS" },
+    { gene_name: "gene12", start: 120000, end: 120800, strand: "-", chromosome: "chr", feature_type: "CDS" },
   ];
-  return out;
-}
-function demoContacts(ann: Annotation[]): Array<[number, number]> {
-  const rng = ((x:number)=>()=> (x=(x*1103515245+12345)&0x7fffffff)/0x7fffffff)(42);
-  const as = new Map(ann.map(a => [a.gene_name, a]));
-  const SR = as.get("srna1")!;
-  const pairs: Array<[number, number]> = [];
-  // make a hotspot with each CDS
-  for (const g of ["gene8","gene12","gene14","gene20"]) {
-    const A = as.get(g)!;
-    for (let k = 0; k < 220; k++) {
-      const y = SR.start + 10 + Math.floor(rng() * (SR.end - SR.start - 20));
-      const x = A.start + 30 + Math.floor(rng() * (A.end - A.start - 60));
-      pairs.push([y, x]);
-      pairs.push([x, y]); // symmetric
-    }
-  }
-  return pairs;
+  const contacts: Array<[number, number]> = [];
+  // srna1 (10,050) ↔ gene5 (50,300 ± jitter)
+  for (let i = 0; i < 180; i++) contacts.push([10040 + (i % 60), 50300 + ((i * 7) % 80)]);
+  // srna1 (10,060) ↔ gene12 (120,400 ± jitter)
+  for (let i = 0; i < 160; i++) contacts.push([10060 + (i % 50), 120400 - ((i * 5) % 90)]);
+  // some noise
+  for (let i = 0; i < 80; i++) contacts.push([9950 + (i % 120), 51000 + ((i * 11) % 200)]);
+  return { ann, contacts };
 }
 
-/* ---------------- Page ---------------- */
 export default function PairMapPage() {
-  // fast demo
-  const [annotations, setAnnotations] = useState<Annotation[]>(() => demoAnnotations());
-  const [contacts, setContacts] = useState<Array<[number, number]>>(() => demoContacts(demoAnnotations()));
+  const demo = useMemo(demoPairData, []);
+  const [annotations, setAnnotations] = useState<Annotation[]>(demo.ann);
+  const [contacts, setContacts] = useState<Array<[number, number]>>(demo.contacts);
 
   const [loadedAnnoName, setLoadedAnnoName] = useState<string | null>(null);
   const [loadedContactsName, setLoadedContactsName] = useState<string | null>(null);
 
   const [primaryRNA, setPrimaryRNA] = useState("srna1");
-  const [secondaryList, setSecondaryList] = useState("gene8, gene12, gene14");
+  const [secondaryList, setSecondaryList] = useState("gene5, gene12");
 
-  // parse query (?primary=&sec= or ?genes=) without useSearchParams (build-safe)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const sp = new URLSearchParams(window.location.search);
-    const p = sp.get("primary");
-    const sec = sp.get("sec");
-    const gs = sp.get("genes");
-    if (p) setPrimaryRNA(p);
-    if (sec) setSecondaryList(sec);
-    else if (gs) {
-      // if only ?genes provided, put the first as primary and rest as secondary
-      const parts = gs.split(/[, \n\t\r]+/).map(s => s.trim()).filter(Boolean);
-      if (parts.length > 0) setPrimaryRNA(parts[0]);
-      if (parts.length > 1) setSecondaryList(parts.slice(1).join(", "));
-    }
-  }, []);
-
-  // Sliders
   const [flankY, setFlankY] = useState(300);
   const [flankX, setFlankX] = useState(300);
   const [binSize, setBinSize] = useState(10);
   const [vmax, setVmax] = useState(10);
 
-  // index
+  // parse ?y=...&x=... once on client
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const y = sp.get("y");
+    const x = sp.get("x");
+    if (y) setPrimaryRNA(y);
+    if (x) setSecondaryList(x);
+  }, []);
+
   const annoByName = useMemo(() => {
     const m = new Map<string, Annotation>();
     for (const a of annotations) m.set(cf(a.gene_name), a);
@@ -171,6 +143,7 @@ export default function PairMapPage() {
     setContacts(parseContactsText(txt));
     setLoadedContactsName(f.name);
   }
+
   async function loadPresetAnno(path: string, label?: string) {
     const res = await fetch(path);
     const text = await res.text();
@@ -184,7 +157,6 @@ export default function PairMapPage() {
     setLoadedContactsName(new URL(url).pathname.split("/").pop() || "contacts.bed");
   }
 
-  // Build one heatmap per X-gene
   const mats = useMemo(() => {
     if (!yAnn) return [];
     const wy_s = Math.max(1, yAnn.start - flankY);
@@ -226,7 +198,6 @@ export default function PairMapPage() {
     });
   }, [contacts, xAnns, yAnn, flankX, flankY, binSize]);
 
-  // Layout
   const leftPad = 54;
   const bottomPad = 56;
   const panelW = 360, panelH = 300, pad = 20;
@@ -261,7 +232,7 @@ export default function PairMapPage() {
       {/* Inputs */}
       <div className="flex flex-wrap gap-6 items-end mb-4">
         <div>
-          <div className="text-sm text-slate-700 mb-1">Primary RNA (Y-axis)</div>
+          <div className="text-sm text-slate-700 mb-1">Primary RNA (Y-axis, case-insensitive)</div>
           <input
             className="border rounded px-3 py-2 w-[260px]"
             value={primaryRNA}
@@ -269,7 +240,7 @@ export default function PairMapPage() {
           />
         </div>
         <div>
-          <div className="text-sm text-slate-700 mb-1">Secondary RNAs (comma/space)</div>
+          <div className="text-sm text-slate-700 mb-1">Secondary RNAs (comma/space, case-insensitive)</div>
           <input
             className="border rounded px-3 py-2 w-[420px]"
             value={secondaryList}
@@ -277,7 +248,6 @@ export default function PairMapPage() {
           />
         </div>
 
-        {/* Flanks */}
         <div className="flex items-center gap-2">
           <label className="text-sm text-slate-700 w-20">Flank Y</label>
           <input type="range" min={0} max={1000} step={10} value={flankY}
@@ -291,7 +261,6 @@ export default function PairMapPage() {
           <span className="text-xs text-slate-600 w-14 text-right">{flankX} nt</span>
         </div>
 
-        {/* Binning + Vmax */}
         <div className="flex items-center gap-2">
           <label className="text-sm text-slate-700 w-20">Bin size</label>
           <input type="range" min={5} max={50} step={5} value={binSize}
@@ -306,9 +275,7 @@ export default function PairMapPage() {
         </div>
 
         <div className="flex-1" />
-
         <div className="flex gap-6 items-center">
-          {/* Annotations: preset + file */}
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Annotations CSV</div>
             <div className="flex items-center gap-2">
@@ -336,10 +303,9 @@ export default function PairMapPage() {
               </select>
               <input type="file" accept=".csv" onChange={onAnnoFile}/>
             </div>
-            <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(demo data loaded)"}</div>
+            <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(demo loaded)"}</div>
           </label>
 
-          {/* Chimeras: preset + file */}
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Chimeras (.bed or .csv)</div>
             <div className="flex items-center gap-2">
@@ -355,7 +321,7 @@ export default function PairMapPage() {
               </select>
               <input type="file" accept=".bed,.csv" onChange={onContactsFile}/>
             </div>
-            <div className="text-xs text-slate-500 mt-1">{loadedContactsName || "(demo data loaded)"}</div>
+            <div className="text-xs text-slate-500 mt-1">{loadedContactsName || "(demo loaded)"}</div>
           </label>
         </div>
       </div>
@@ -382,6 +348,7 @@ export default function PairMapPage() {
             return (
               <g key={i} transform={`translate(${left},${top})`}>
                 <rect x={54} y={10} width={cw} height={ch} fill="#fff" stroke="#222" strokeWidth={1} />
+
                 {m.mat.map((row, yy) =>
                   row.map((v, xx) => (
                     <rect
@@ -390,7 +357,7 @@ export default function PairMapPage() {
                       y={yPix(yy)}
                       width={cellW}
                       height={cellH}
-                      fill={colorFrom(v, vmax, i % 6)}
+                      fill={v > 0 ? colorFrom(v, vmax, i % 6) : "#ffffff"}
                     />
                   ))
                 )}
@@ -404,8 +371,8 @@ export default function PairMapPage() {
                   const xlbls = [`-${flankX}`, "start", "end", `+${flankX}`];
                   return xticks.map((b, j) => (
                     <g key={j} transform={`translate(${54 + (b / m.bins_x) * cw},${10 + ch})`}>
-                      <line y2={6} stroke="#222" />
-                      <text y={18} textAnchor="middle">{xlbls[j]}</text>
+                      <line x1={0} y1={0} x2={0} y2={6} stroke="#222" />
+                      <text x={0} y={18} textAnchor="middle">{xlbls[j]}</text>
                     </g>
                   ));
                 })()}
@@ -442,15 +409,6 @@ export default function PairMapPage() {
           Upload annotations (via dropdown or file) and ensure the primary RNA exists (names are case-insensitive).
         </div>
       )}
-      <section className="mx-auto max-w-7xl p-4">
-        <div className="border rounded-2xl p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <div className="font-semibold">pairMAP quick guide</div>
-            <a href="/PairHelp.png" download className="text-xs text-blue-600 hover:underline">Download PNG</a>
-          </div>
-          <img src="/PairHelp.png" alt="pairMAP help" loading="lazy" className="mt-2 w-full h-auto rounded-lg border" />
-        </div>
-      </section>
     </div>
   );
 }

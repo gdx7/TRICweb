@@ -12,9 +12,8 @@ export default function HelpPage() {
       <header className="mb-4">
         <h1 className="text-2xl font-semibold mb-1">TRIC-seq explorer guide</h1>
         <p className="text-red-600 font-semibold">
-          Important: after selecting a preset, please wait briefly while the site loads
-          the interaction and chimera files. 
-          Once loaded you can interact with these dataset without delay.
+          Important: after selecting a preset file, please wait briefly while the tool loads
+          the interaction and chimera files. Once loaded you can interact with these dataset without delay.
         </p>
         <p className="text-slate-700">
           A quick guide to TRIC-seq and how to explore RNA–RNA interactions,

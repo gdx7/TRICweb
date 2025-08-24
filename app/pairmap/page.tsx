@@ -1,28 +1,38 @@
 "use client";
 
-import React, { useMemo, useState, useRef, useEffect } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import Papa from "papaparse";
-import Link from "next/link";
 import { PRESETS } from "@/lib/presets";
 
-/* ---------------- Types & helpers (as in your original) ---------------- */
-type FeatureType = "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
-type Annotation = { gene_name: string; start: number; end: number; feature_type?: FeatureType; strand?: string; chromosome?: string; };
+/* ---------------- Types ---------------- */
+type FeatureType =
+  | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
 
+type Annotation = {
+  gene_name: string;
+  start: number;
+  end: number;
+  feature_type?: FeatureType;
+  strand?: string;
+  chromosome?: string;
+};
+
+/* ---------------- Helpers ---------------- */
 const cf = (s: string) => String(s || "").trim().toLowerCase();
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
   const t = (type || "CDS") as FeatureType;
-  return (t === "sRNA" || t === "ncRNA" || t === "sponge") ? { text: cap1(name), italic: false } : { text: name, italic: true };
+  if (t === "sRNA" || t === "ncRNA" || t === "sponge") return { text: cap1(name), italic: false };
+  return { text: name, italic: true };
 }
-
 function exportSVG(svgId: string, name: string) {
   const el = document.getElementById(svgId) as SVGSVGElement | null;
   if (!el) return;
   const clone = el.cloneNode(true) as SVGSVGElement;
   const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
   const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-  style.textContent = 'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:10px}';
+  style.textContent =
+    'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:10px}';
   defs.appendChild(style);
   clone.insertBefore(defs, clone.firstChild);
   const ser = new XMLSerializer();
@@ -50,7 +60,7 @@ function parseAnnoCSV(csv: string): Annotation[] {
     }));
 }
 
-// Parse contacts (.bed, BED-like, or two-column CSV/TSV)
+// Parse contacts from raw text (supports .bed, 2-col CSV/TSV)
 function parseContactsText(txt: string): Array<[number, number]> {
   const lines = txt.split(/\r?\n/).filter(Boolean);
   const rows: Array<[number, number]> = [];
@@ -66,32 +76,103 @@ function parseContactsText(txt: string): Array<[number, number]> {
   return rows;
 }
 
+/* ---------------- Demo simulation ---------------- */
+function simulateAnnotations(nGenes = 80): Annotation[] {
+  const rng = ((s: number) => () => (s = (s * 1103515245 + 12345) % 0xffffffff) / 0xffffffff)(17);
+  const genome = 4_000_000;
+  const out: Annotation[] = [];
+  for (let i = 1; i <= nGenes; i++) {
+    const start = Math.floor(rng() * (genome - 1200)) + 1;
+    const len = 300 + Math.floor(rng() * 900);
+    const end = Math.min(start + len, genome);
+    out.push({ gene_name: `gene${i}`, start, end, feature_type: "CDS", strand: rng() > 0.5 ? "+" : "-" });
+    if (rng() > 0.5) out.push({ gene_name: `5'gene${i}`, start: Math.max(1, start - 120), end: start + 60, feature_type: "5'UTR", strand: "+" });
+    if (rng() > 0.5) out.push({ gene_name: `3'gene${i}`, start: end - 60, end: Math.min(end + 120, genome), feature_type: "3'UTR", strand: "+" });
+  }
+  for (let i = 1; i <= Math.floor(nGenes * 0.1); i++) {
+    const start = Math.floor(rng() * (genome - 350)) + 1;
+    const end = start + 200 + Math.floor(rng() * 120);
+    out.push({ gene_name: `srna${i}`, start, end, feature_type: "sRNA", strand: "+", chromosome: "chr" });
+  }
+  return out;
+}
+
+function simulateContacts(ann: Annotation[], pairs: Array<[string, string]>): Array<[number, number]> {
+  // Build dense clusters between selected gene pairs
+  const rng = ((s: number) => () => (s = (s * 48271) % 0x7fffffff) / 0x7fffffff)(99);
+  const contacts: Array<[number, number]> = [];
+  function jitter(a: number, b: number) { return Math.floor(a + (b - a) * rng()); }
+
+  for (const [A, B] of pairs) {
+    const a = ann.find(x => x.gene_name === A);
+    const b = ann.find(x => x.gene_name === B);
+    if (!a || !b) continue;
+    const aS = Math.max(1, a.start - 300), aE = a.end + 300;
+    const bS = Math.max(1, b.start - 300), bE = b.end + 300;
+
+    // Dense diagonal-ish hotspot + spread
+    for (let k = 0; k < 1400; k++) {
+      const ax = jitter(aS, aE);
+      const bx = Math.min(bE, Math.max(bS, ax + Math.floor((rng() - 0.5) * 80)));
+      contacts.push([ax, bx]);
+      contacts.push([bx, ax]); // make it bidirectional-rich
+    }
+    // Background
+    for (let k = 0; k < 400; k++) {
+      contacts.push([jitter(aS, aE), jitter(bS, bE)]);
+    }
+  }
+  return contacts;
+}
+
 /* ---------------- Page ---------------- */
 export default function PairMapPage() {
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const [contacts, setContacts] = useState<Array<[number, number]>>([]);
+  // Demo defaults (synthetic)
+  const demoAnno = useMemo(() => simulateAnnotations(90), []);
+  const demoContacts = useMemo(
+    () => simulateContacts(demoAnno, [["gene10", "gene16"], ["gene10", "gene32"], ["srna3", "5'gene28"]]),
+    [demoAnno]
+  );
+
+  const [annotations, setAnnotations] = useState<Annotation[]>(demoAnno);
+  const [contacts, setContacts] = useState<Array<[number, number]>>(demoContacts);
 
   const [loadedAnnoName, setLoadedAnnoName] = useState<string | null>(null);
   const [loadedContactsName, setLoadedContactsName] = useState<string | null>(null);
 
-  const [primaryRNA, setPrimaryRNA] = useState("gcvB");
-  const [secondaryList, setSecondaryList] = useState("oppA_5UTR, argT_5UTR");
+  // Inputs (synthetic by default)
+  const [primaryRNA, setPrimaryRNA] = useState("gene10");
+  const [secondaryList, setSecondaryList] = useState("gene16, gene32");
 
+  // Sliders
   const [flankY, setFlankY] = useState(300);
   const [flankX, setFlankX] = useState(300);
   const [binSize, setBinSize] = useState(10);
   const [vmax, setVmax] = useState(10);
 
-  // Accept query params on the client (no useSearchParams)
+  // remember presets; also read from query/localStorage
+  function remember(k: string, v: string) { try { localStorage.setItem(k, v); } catch {} }
   useEffect(() => {
     if (typeof window === "undefined") return;
     const qs = new URLSearchParams(window.location.search);
-    const p = qs.get("primary");
-    const s = qs.get("secondary");
-    if (p) setPrimaryRNA(p);
-    if (s) setSecondaryList(s);
+    const a = qs.get("anno");
+    const c = qs.get("chim");
+    const y = qs.get("primary");
+    const xs = qs.get("genes");
+    if (a) loadPresetAnno(a, a.split("/").pop());
+    if (c) loadContactsFromURL(c);
+    if (y) setPrimaryRNA(y);
+    if (xs) setSecondaryList(xs);
+    if (!a && !c) {
+      const la = localStorage.getItem("TRIC_annoURL");
+      const lc = localStorage.getItem("TRIC_chimURL");
+      const laLabel = localStorage.getItem("TRIC_annoLabel") || undefined;
+      if (la) loadPresetAnno(la, laLabel);
+      if (lc) loadContactsFromURL(lc);
+    }
   }, []);
 
+  // case-insensitive annotation index
   const annoByName = useMemo(() => {
     const m = new Map<string, Annotation>();
     for (const a of annotations) m.set(cf(a.gene_name), a);
@@ -101,8 +182,13 @@ export default function PairMapPage() {
   const primaryKey = cf(primaryRNA);
   const yAnn = annoByName.get(primaryKey);
 
-  const xInputsRaw = useMemo(() => secondaryList.split(/[, \s]+/).map(s => s.trim()).filter(Boolean), [secondaryList]);
-  const xAnns = xInputsRaw.map((label) => ({ label, key: cf(label), ann: annoByName.get(cf(label)) })).filter((d) => d.ann) as { label: string; key: string; ann: Annotation }[];
+  const xInputsRaw = useMemo(
+    () => secondaryList.split(/[, \s]+/).map(s => s.trim()).filter(Boolean),
+    [secondaryList]
+  );
+  const xAnns = xInputsRaw
+    .map((label) => ({ label, key: cf(label), ann: annoByName.get(cf(label)) }))
+    .filter((d) => d.ann) as { label: string; key: string; ann: Annotation }[];
 
   async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
@@ -110,62 +196,32 @@ export default function PairMapPage() {
     setAnnotations(parseAnnoCSV(txt));
     setLoadedAnnoName(f.name);
   }
+
   async function onContactsFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
     const txt = await f.text();
     setContacts(parseContactsText(txt));
     setLoadedContactsName(f.name);
   }
-  async function loadPresetAnno(path: string, label?: string) {
-    const res = await fetch(path);
+
+  async function loadPresetAnno(path: string | URL, label?: string) {
+    const res = await fetch(path.toString());
     const text = await res.text();
     setAnnotations(parseAnnoCSV(text));
-    if (label) setLoadedAnnoName(label);
+    setLoadedAnnoName(label || path.toString().split("/").pop() || "annotations.csv");
+    remember("TRIC_annoURL", path.toString());
+    remember("TRIC_annoLabel", label || "");
   }
+
   async function loadContactsFromURL(url: string) {
     const res = await fetch(url);
     const text = await res.text();
     setContacts(parseContactsText(text));
     setLoadedContactsName(new URL(url).pathname.split("/").pop() || "contacts.bed");
+    remember("TRIC_chimURL", url);
   }
 
-  // NEW: demo data (annotations + synthetic hotspots)
-  function loadDemo() {
-    const ann: Annotation[] = [
-      { gene_name: "gcvB", start: 100000, end: 100180, feature_type: "sRNA", strand: "+", chromosome: "chr" },
-      { gene_name: "oppA_5UTR", start: 210000, end: 210150, feature_type: "5'UTR", strand: "+", chromosome: "chr" },
-      { gene_name: "argT_5UTR", start: 350000, end: 350150, feature_type: "5'UTR", strand: "+", chromosome: "chr" },
-      { gene_name: "dppA_5UTR", start: 420000, end: 420140, feature_type: "5'UTR", strand: "+", chromosome: "chr" },
-    ];
-    const randN = (n: number, mu: number, sigma: number) => {
-      const out: number[] = [];
-      for (let i = 0; i < n; i++) {
-        // Box-Muller
-        const u = Math.random(), v = Math.random();
-        const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-        out.push(Math.round(mu + sigma * z));
-      }
-      return out;
-    };
-    const contacts: Array<[number, number]> = [];
-    // Hotspots gcvB × each 5'UTR
-    const g = ann[0];
-    const makePair = (x: Annotation, n = 400) => {
-      const ys = randN(n, (g.start + g.end) / 2, 20);
-      const xs = randN(n, (x.start + x.end) / 2, 25);
-      for (let i = 0; i < n; i++) contacts.push([ys[i]!, xs[i]!]);
-    };
-    makePair(ann[1]); makePair(ann[2], 320); makePair(ann[3], 280);
-
-    setAnnotations(ann);
-    setContacts(contacts);
-    setLoadedAnnoName("(demo)");
-    setLoadedContactsName("(demo)");
-    setPrimaryRNA("gcvB");
-    setSecondaryList("oppA_5UTR, argT_5UTR, dppA_5UTR");
-  }
-
-  /* ===== matrices ===== */
+  // Build one heatmap per X-gene
   const mats = useMemo(() => {
     if (!yAnn) return [];
     const wy_s = Math.max(1, yAnn.start - flankY);
@@ -207,7 +263,7 @@ export default function PairMapPage() {
     });
   }, [contacts, xAnns, yAnn, flankX, flankY, binSize]);
 
-  /* ===== layout & color ===== */
+  // Layout
   const panelW = 360, panelH = 300;
   const W = Math.max(panelW * Math.max(1, mats.length) + 20 * 2, 760);
   const H = panelH + 120;
@@ -216,10 +272,7 @@ export default function PairMapPage() {
     const t = Math.max(0, Math.min(1, val / Math.max(1, vmaxVal)));
     const hues = [0, 120, 220, 30, 280, 0];
     const hue = hues[paletteIndex]!;
-    if (paletteIndex === 5) {
-      const g = Math.round(230 - t * 200);
-      return `rgb(${g},${g},${g})`;
-    }
+    if (paletteIndex === 5) { const g = Math.round(230 - t * 200); return `rgb(${g},${g},${g})`; }
     return `hsla(${hue}, 75%, 50%, ${Math.pow(t, 0.85)})`;
   }
 
@@ -229,21 +282,33 @@ export default function PairMapPage() {
     <div className="mx-auto max-w-[1500px] p-4">
       <div className="flex items-center justify-between mb-3">
         <h1 className="text-xl font-semibold">pairMAP</h1>
-        <div className="flex items-center gap-2">
-          <button onClick={() => exportSVG("pairmap-svg", "pairMAP")} className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50">Export SVG</button>
-          <button onClick={loadDemo} className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50">Load Demo</button>
-        </div>
+        <button
+          onClick={() => exportSVG("pairmap-svg", "pairMAP")}
+          className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
+        >
+          Export SVG
+        </button>
       </div>
 
       {/* Inputs */}
       <div className="flex flex-wrap gap-6 items-end mb-4">
         <div>
-          <div className="text-sm text-slate-700 mb-1">Primary RNA (Y-axis, case-insensitive)</div>
-          <input className="border rounded px-3 py-2 w-[260px]" value={primaryRNA} onChange={(e) => setPrimaryRNA(e.target.value)} />
+          <div className="text-sm text-slate-700 mb-1">Primary RNA (Y-axis)</div>
+          <input
+            className="border rounded px-3 py-2 w-[260px]"
+            value={primaryRNA}
+            onChange={(e) => setPrimaryRNA(e.target.value)}
+            placeholder="e.g., gene10"
+          />
         </div>
         <div>
-          <div className="text-sm text-slate-700 mb-1">Secondary RNAs (comma/space, case-insensitive)</div>
-          <input className="border rounded px-3 py-2 w-[420px]" value={secondaryList} onChange={(e) => setSecondaryList(e.target.value)} />
+          <div className="text-sm text-slate-700 mb-1">Secondary RNAs (comma/space)</div>
+          <input
+            className="border rounded px-3 py-2 w-[420px]"
+            value={secondaryList}
+            onChange={(e) => setSecondaryList(e.target.value)}
+            placeholder="e.g., gene16, gene32"
+          />
         </div>
 
         {/* Flank sliders */}
@@ -276,33 +341,43 @@ export default function PairMapPage() {
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Annotations CSV</div>
             <div className="flex items-center gap-2">
-              <select className="border rounded px-2 py-1 text-xs" defaultValue="" onChange={(e) => {
-                const map: Record<string, string> = { "preset-ec": "/Anno_EC.csv", "preset-ss": "/Anno_SS.csv", "preset-mx": "/Anno_MX.csv", "preset-sa": "/Anno_SA.csv", "preset-bs": "/Anno_BS.csv" };
-                const v = e.target.value; if (map[v]) loadPresetAnno(map[v], map[v].slice(1));
-              }}>
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                defaultValue=""
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v) loadPresetAnno(v, v.split("/").pop() || "annotations.csv");
+                }}
+              >
                 <option value="" disabled>Select preset…</option>
-                <option value="preset-ec">Anno_EC.csv</option>
-                <option value="preset-ss">Anno_SS.csv</option>
-                <option value="preset-mx">Anno_MX.csv</option>
-                <option value="preset-sa">Anno_SA.csv</option>
-                <option value="preset-bs">Anno_BS.csv</option>
+                <option value="/Anno_EC.csv">Anno_EC.csv</option>
+                <option value="/Anno_SS.csv">Anno_SS.csv</option>
+                <option value="/Anno_MX.csv">Anno_MX.csv</option>
+                <option value="/Anno_SA.csv">Anno_SA.csv</option>
+                <option value="/Anno_BS.csv">Anno_BS.csv</option>
               </select>
               <input type="file" accept=".csv" onChange={onAnnoFile}/>
             </div>
-            <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(none loaded)"}</div>
+            <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(using simulated annotations)"}</div>
           </label>
 
           {/* Chimeras */}
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Chimeras (.bed or .csv)</div>
             <div className="flex items-center gap-2">
-              <select className="border rounded px-2 py-1 text-xs" defaultValue="" onChange={(e) => { const u = e.target.value; if (u) loadContactsFromURL(u); }}>
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                defaultValue=""
+                onChange={(e) => { const u = e.target.value; if (u) loadContactsFromURL(u); }}
+              >
                 <option value="" disabled>Select preset…</option>
-                {PRESETS.chimeras.map(p => (<option key={p.url} value={p.url}>{p.label}</option>))}
+                {PRESETS.chimeras.map(p => (
+                  <option key={p.url} value={p.url}>{p.label}</option>
+                ))}
               </select>
               <input type="file" accept=".bed,.csv" onChange={onContactsFile}/>
             </div>
-            <div className="text-xs text-slate-500 mt-1">{loadedContactsName || "(none loaded)"}</div>
+            <div className="text-xs text-slate-500 mt-1">{loadedContactsName || "(using simulated contacts)"}</div>
           </label>
         </div>
       </div>
@@ -310,7 +385,9 @@ export default function PairMapPage() {
       {/* Multi-panel heatmaps */}
       <div className="rounded-lg border bg-white overflow-x-auto">
         <svg id="pairmap-svg" width={W} height={H} style={{ display: "block" }}>
-          <defs><style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:10px}`}</style></defs>
+          <defs>
+            <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:10px}`}</style>
+          </defs>
 
           {mats.map((m, i) => {
             const left = 10 + i * panelW;
@@ -330,10 +407,17 @@ export default function PairMapPage() {
                 {/* frame */}
                 <rect x={54} y={10} width={cw} height={ch} fill="#fff" stroke="#222" strokeWidth={1} />
 
-                {/* cells */}
+                {/* cells with per-panel palette + vmax (Y inverted) */}
                 {m.mat.map((row, yy) =>
                   row.map((v, xx) => (
-                    <rect key={`${yy}-${xx}`} x={54 + xx * cellW} y={yPix(yy)} width={cellW} height={cellH} fill={colorFrom(v, vmax, m.paletteIndex)} />
+                    <rect
+                      key={`${yy}-${xx}`}
+                      x={54 + xx * cellW}
+                      y={yPix(yy)}
+                      width={cellW}
+                      height={cellH}
+                      fill={colorFrom(v, vmax, m.paletteIndex)}
+                    />
                   ))
                 )}
 
@@ -368,17 +452,12 @@ export default function PairMapPage() {
                 })()}
 
                 {/* axis labels */}
-                <text x={54 + cw / 2} y={ch + 38} textAnchor="middle" style={{ fontStyle: dispX.italic ? "italic" : "normal" }}>{dispX.text} (5′→3′)</text>
+                <text x={54 + cw / 2} y={ch + 38} textAnchor="middle" style={{ fontStyle: dispX.italic ? "italic" : "normal" }}>
+                  {dispX.text} (5′→3′)
+                </text>
                 <text transform={`translate(${54 - 34},${10 + ch / 2}) rotate(-90)`} textAnchor="middle" style={{ fontStyle: dispY.italic ? "italic" : "normal" }}>
                   {dispY.text} (5′→3′)
                 </text>
-
-                {/* NEW: link to foldMAP for this X RNA */}
-                <a href={`/foldmap?rna=${encodeURIComponent(m.label)}`}>
-                  <text x={54 + cw - 4} y={10 - 6} textAnchor="end" fill="#2563eb" style={{ textDecoration: "underline" }}>
-                    foldMAP →
-                  </text>
-                </a>
               </g>
             );
           })}
@@ -387,18 +466,19 @@ export default function PairMapPage() {
 
       {!yAnn && (
         <div className="mt-2 text-xs text-amber-700">
-          Upload annotations (via dropdown or file) and ensure the primary RNA exists (names are case-insensitive), or click <button onClick={loadDemo} className="underline">Load Demo</button>.
+          Upload annotations (via dropdown or file) and ensure the primary RNA exists (names are case-insensitive).
         </div>
       )}
-
-      {/* quick guide image stays unchanged */}
+      {/* Quick guide image retained */}
       <section className="mx-auto max-w-7xl p-4">
         <div className="border rounded-2xl p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <div className="font-semibold">pairMAP quick guide</div>
-            <a href="/PairHelp.png" download className="text-xs text-blue-600 hover:underline">Download PNG</a>
-          </div>
-          <img src="/PairHelp.png" alt="Annotated pairMAP screenshot with example plots and TRIC-seq workflow." loading="lazy" className="mt-2 w-full h-auto rounded-lg border" />
+          <div className="font-semibold">pairMAP quick guide</div>
+          <img
+            src="/PairHelp.png"
+            alt="Annotated pairMAP screenshot with example plots and TRIC-seq workflow."
+            loading="lazy"
+            className="mt-2 w-full h-auto rounded-lg border"
+          />
         </div>
       </section>
     </div>

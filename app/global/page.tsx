@@ -1,6 +1,7 @@
+// app/global/page.tsx
 "use client";
 
-import React, { useMemo, useState, useRef } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 
@@ -30,6 +31,7 @@ type Pair = {
   target: string;
   counts?: number;
   odds_ratio?: number;
+  fdr?: number; // NEW: optional FDR
   totals?: number;
   total_ref?: number;
   ref_type?: FeatureType;
@@ -38,14 +40,15 @@ type Pair = {
 
 type ScatterRow = {
   partner: string;
-  x: number;       // genomic midpoint (absolute)
-  start: number;   // genomic start
-  end: number;     // genomic end
-  y: number;       // capped OR for plotting
-  rawY: number;    // true odds_ratio
-  counts: number;  // deduped counts (max across orientations)
+  x: number;
+  start: number;
+  end: number;
+  y: number;        // capped OR for plotting
+  rawY: number;     // true odds_ratio
+  counts: number;   // deduped counts
   type: FeatureType;
-  distance: number;
+  distance: number; // genomic midpoints distance (no longer filtered)
+  fdr?: number;     // NEW: min FDR across orientations, if present
 };
 
 const FEATURE_COLORS: Record<FeatureType, string> = {
@@ -61,40 +64,41 @@ const FEATURE_COLORS: Record<FeatureType, string> = {
 };
 const pickColor = (ft?: FeatureType) => FEATURE_COLORS[ft || "CDS"] || "#F78208";
 
-function simulateData(nGenes = 500) {
+// --------- denser simulation ----------
+function simulateData(nGenes = 650) {
   const rng = ((seed: number) => () => (seed = (seed * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(42);
   const ann: Annotation[] = [];
   const genomeLen = 4_641_652;
 
-  // Create CDS genes gene1..geneN and optional UTR entries 5'geneX / 3'geneX
+  // more genes + UTRs
   for (let i = 1; i <= nGenes; i++) {
     const start = Math.floor(rng() * (genomeLen - 2000)) + 1;
     const len = Math.max(150, Math.floor(rng() * 1500));
     const end = Math.min(start + len, genomeLen);
     ann.push({ gene_name: `gene${i}`, start, end, feature_type: "CDS", strand: rng() > 0.5 ? "+" : "-", chromosome: "chr" });
 
-    if (rng() > 0.4) {
-      const u5s = Math.max(1, start - Math.floor(rng() * 150));
-      const u5e = Math.min(start + Math.floor(len * 0.2), genomeLen);
+    if (rng() > 0.35) {
+      const u5s = Math.max(1, start - Math.floor(rng() * 200));
+      const u5e = Math.min(start + Math.floor(len * 0.25), genomeLen);
       ann.push({ gene_name: `5'gene${i}`, start: u5s, end: u5e, feature_type: "5'UTR", strand: "+", chromosome: "chr" });
     }
-    if (rng() > 0.4) {
-      const u3s = Math.max(end - Math.floor(len * 0.2), 1);
-      const u3e = Math.min(end + Math.floor(rng() * 150), genomeLen);
+    if (rng() > 0.35) {
+      const u3s = Math.max(end - Math.floor(len * 0.25), 1);
+      const u3e = Math.min(end + Math.floor(rng() * 200), genomeLen);
       ann.push({ gene_name: `3'gene${i}`, start: u3s, end: u3e, feature_type: "3'UTR", strand: "+", chromosome: "chr" });
     }
   }
 
-  // Add some sRNAs/ncRNAs/sponges with generic names
-  for (let i = 1; i <= Math.floor(nGenes * 0.08); i++) {
+  // extra sRNAs/ncRNAs/sponges
+  for (let i = 1; i <= Math.floor(nGenes * 0.11); i++) {
     const start = Math.floor(rng() * (genomeLen - 400)) + 1;
-    const end = Math.min(start + 200 + Math.floor(rng() * 200), genomeLen);
-    const t = rng() < 0.5 ? "sRNA" : "ncRNA";
+    const end = Math.min(start + 200 + Math.floor(rng() * 250), genomeLen);
+    const t = rng() < 0.55 ? "sRNA" : "ncRNA";
     ann.push({ gene_name: `${t.toLowerCase()}${i}`, start, end, feature_type: t, strand: "+", chromosome: "chr" });
   }
-  for (let i = 1; i <= Math.floor(nGenes * 0.02); i++) {
+  for (let i = 1; i <= Math.floor(nGenes * 0.03); i++) {
     const start = Math.floor(rng() * (genomeLen - 400)) + 1;
-    const end = Math.min(start + 200 + Math.floor(rng() * 200), genomeLen);
+    const end = Math.min(start + 200 + Math.floor(rng() * 250), genomeLen);
     ann.push({ gene_name: `sponge${i}`, start, end, feature_type: "sponge", strand: "+", chromosome: "chr" });
   }
 
@@ -102,8 +106,10 @@ function simulateData(nGenes = 500) {
   const genes = ann.map(a => a.gene_name);
 
   function addEdge(a: string, b: string, bias = 1) {
-    const c = Math.max(1, Math.floor((rng() ** 2) * 120 * bias));
-    const or = 0.5 + Math.pow(rng(), 0.4) * 400 * bias;
+    // denser counts + higher ORs
+    const c = Math.max(1, Math.floor((rng() ** 0.8) * 200 * bias));
+    const or = 0.8 + Math.pow(rng(), 0.35) * 650 * bias;
+    const fdr = Math.pow(rng(), 4) * 0.2; // 0..0.2 skewed to small values
     const aAnn = ann.find(x => x.gene_name === a);
     const bAnn = ann.find(x => x.gene_name === b);
     pairs.push({
@@ -111,46 +117,42 @@ function simulateData(nGenes = 500) {
       target: b,
       counts: c,
       odds_ratio: or,
+      fdr,
       ref_type: aAnn?.feature_type,
       target_type: bAnn?.feature_type,
     });
   }
 
-  // Random edges
-  for (let k = 0; k < nGenes * 2; k++) {
+  // denser random edges
+  for (let k = 0; k < nGenes * 5; k++) {
     const a = genes[Math.floor(rng() * genes.length)];
     let b = genes[Math.floor(rng() * genes.length)];
     if (a === b) continue;
     addEdge(a, b, 1);
   }
 
-  // Make a generic sRNA/ncRNA hub in the simulation
+  // hub sRNA/ncRNA edges
   const sLike = ann.filter(a => a.feature_type === "sRNA" || a.feature_type === "ncRNA").map(a => a.gene_name);
   const pick = (n: number) => Array.from({ length: n }, () => genes[Math.floor(rng() * genes.length)]);
-  if (sLike.length > 0) pick(60).forEach(g => addEdge(sLike[Math.floor(rng() * sLike.length)], g, 4));
+  if (sLike.length > 0) pick(120).forEach(g => addEdge(sLike[Math.floor(rng() * sLike.length)], g, 5));
 
   return { annotations: ann, pairs };
 }
 
+// -------- helpers ----------
 function symlog(y: number, linthresh = 10, base = 10) {
   const s = Math.sign(y);
   const a = Math.abs(y);
   return a <= linthresh ? s * (a / linthresh) : s * (1 + Math.log(a / linthresh) / Math.log(base));
 }
-
-// ---- display helpers ----
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
-
-// Italicize CDS/UTRs/etc **without** changing case; TitleCase only for sRNA/ncRNA/sponge
 function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
   const t = type || "CDS";
   if (t === "sRNA" || t === "ncRNA" || t === "sponge") {
-    return { text: cap1(name), italic: false }; // e.g., sroC -> SroC
+    return { text: cap1(name), italic: false };
   }
-  // For 5'UTR, 3'UTR, CDS, tRNA, rRNA, hkRNA: keep exact casing, italicize
-  return { text: name, italic: true }; // e.g., 5'argT stays "5'argT" but italic
+  return { text: name, italic: true };
 }
-
 const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
   if (ft === "sRNA" || ft === "ncRNA") return { label: "sRNA/ncRNA", italic: false };
   if (ft === "sponge") return { label: "Sponge", italic: false };
@@ -158,16 +160,14 @@ const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
   return { label: ft, italic: false };
 };
 
-type ExcludeGroup = { label: string; types: FeatureType[] };
-
+// ---------- Page ----------
 export default function Page() {
-  const [data, setData] = useState(() => simulateData(500));
+  const [data, setData] = useState(() => simulateData(650)); // denser
   const [focal, setFocal] = useState<string>("srna1");
   const [minCounts, setMinCounts] = useState(5);
-  const [minDistance, setMinDistance] = useState(5000);
   const [yCap, setYCap] = useState(5000);
   const [labelThreshold, setLabelThreshold] = useState(50);
-  const [sizeScaleFactor, setSizeScaleFactor] = useState(1); // NEW: circle size scale
+  const [sizeScaleFactor, setSizeScaleFactor] = useState(1);
   const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["tRNA"]);
   const [query, setQuery] = useState("");
   const [highlightQuery, setHighlightQuery] = useState("");
@@ -217,6 +217,7 @@ export default function Page() {
 
       const counts = Number(e.counts) || 0;
       const type = (ref === focal ? e.target_type : e.ref_type) || partAnn.feature_type || "CDS";
+      const fdr = e.fdr;
 
       const prev = acc.get(partner);
       if (prev) {
@@ -225,6 +226,8 @@ export default function Page() {
         prev.y = Math.min(prev.rawY, yCap);
         prev.type = (prev.type || type) as FeatureType;
         prev.distance = Math.min(prev.distance, dist);
+        // keep best (lowest) FDR if present
+        if (fdr != null) prev.fdr = prev.fdr != null ? Math.min(prev.fdr, fdr) : fdr;
       } else {
         acc.set(partner, {
           partner,
@@ -236,18 +239,18 @@ export default function Page() {
           counts,
           type: type as FeatureType,
           distance: dist,
+          fdr: fdr,
         });
       }
     }
 
     return Array.from(acc.values())
       .filter(r => r.counts >= minCounts)
-      .filter(r => r.distance >= minDistance)
+      // NOTE: no distance filter anymore
       .filter(r => !excludeTypes.includes(r.type))
       .sort((a, b) => b.rawY - a.rawY);
-  }, [pairs, focal, geneIndex, minCounts, minDistance, excludeTypes, yCap]);
+  }, [pairs, focal, geneIndex, minCounts, excludeTypes, yCap]);
 
-  // total chimeras for focal (deduped across orientations), independent of filters
   const focalChimeraTotal = useMemo(() => {
     const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
     const seen = new Map<string, number>();
@@ -264,13 +267,11 @@ export default function Page() {
     return sum;
   }, [pairs, focal]);
 
-  // genome domain (use min start and max end to avoid X-shift)
   const genomeStart = useMemo(() => Math.min(...annotations.map(a => a.start)), [annotations]);
   const genomeEnd = useMemo(() => Math.max(...annotations.map(a => a.end)), [annotations]);
   const genomeLen = Math.max(1, genomeEnd - genomeStart);
 
   const focalAnn = geneIndex[focal];
-
   const yTicks = useMemo(() => [0, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter(v => v <= yCap), [yCap]);
 
   function handleSearchSubmit(e: React.FormEvent) {
@@ -287,7 +288,15 @@ export default function Page() {
     const { data } = Papa.parse<Pair>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows = (data as any[])
       .filter(r => r.ref && r.target)
-      .map(r => ({ ...r, ref: String(r.ref).trim(), target: String(r.target).trim() }));
+      .map(r => ({
+        ...r,
+        ref: String(r.ref).trim(),
+        target: String(r.target).trim(),
+        // force numeric types if present
+        counts: r.counts != null ? Number(r.counts) : undefined,
+        odds_ratio: r.odds_ratio != null ? Number(r.odds_ratio) : undefined,
+        fdr: r.fdr != null ? Number(r.fdr) : undefined,
+      }));
     return rows as Pair[];
   }
   function parseAnnoCSV(csv: string) {
@@ -322,7 +331,6 @@ export default function Page() {
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
 
-  // Load preset Anno_*.csv from /public via dropdown
   async function loadPresetAnno(path: string, label: string) {
     const res = await fetch(path);
     const text = await res.text();
@@ -332,7 +340,6 @@ export default function Page() {
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
 
-  // NEW: Load interactions from URL (Vercel Blob preset)
   async function loadPairsFromURL(url: string) {
     const res = await fetch(url);
     const text = await res.text();
@@ -341,30 +348,23 @@ export default function Page() {
     setLoadedPairsName(new URL(url).pathname.split("/").pop() || "interaction.csv");
   }
 
-  // Exclude groups (hkRNA/rRNA together, sRNA/ncRNA together)
-  const EXCLUDE_GROUPS: ExcludeGroup[] = [
-    { label: "tRNA", types: ["tRNA"] },
-    { label: "5'UTR", types: ["5'UTR"] },
-    { label: "3'UTR", types: ["3'UTR"] },
-    { label: "CDS", types: ["CDS"] },
-    { label: "sponge", types: ["sponge"] },
-    { label: "sRNA/ncRNA", types: ["sRNA", "ncRNA"] },
-    { label: "hkRNA/rRNA", types: ["hkRNA", "rRNA"] },
+  const EXCLUDE_GROUPS = [
+    { label: "tRNA", types: ["tRNA"] as FeatureType[] },
+    { label: "5'UTR", types: ["5'UTR"] as FeatureType[] },
+    { label: "3'UTR", types: ["3'UTR"] as FeatureType[] },
+    { label: "CDS", types: ["CDS"] as FeatureType[] },
+    { label: "sponge", types: ["sponge"] as FeatureType[] },
+    { label: "sRNA/ncRNA", types: ["sRNA", "ncRNA"] as FeatureType[] },
+    { label: "hkRNA/rRNA", types: ["hkRNA", "rRNA"] as FeatureType[] },
   ];
-
   const isGroupActive = (types: FeatureType[]) => types.every(t => excludeTypes.includes(t));
   const toggleGroup = (types: FeatureType[]) => {
     setExcludeTypes(prev => {
       const active = types.every(t => prev.includes(t));
-      if (active) {
-        // remove all
-        return prev.filter(t => !types.includes(t));
-      } else {
-        // add all (dedupe)
-        const s = new Set(prev);
-        types.forEach(t => s.add(t));
-        return Array.from(s);
-      }
+      if (active) return prev.filter(t => !types.includes(t));
+      const s = new Set(prev);
+      types.forEach(t => s.add(t));
+      return Array.from(s);
     });
   };
 
@@ -385,6 +385,29 @@ export default function Page() {
     const a = document.createElement("a");
     a.href = url;
     a.download = `${focal}_interactome.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // NEW: export partners table to CSV
+  function exportPartnersCSV() {
+    const header = ["Partner","Feature","Start","End","io","Of","FDR","Distance"];
+    const rows = partners.map(p => [
+      p.partner,
+      combinedLabel(p.type).label,
+      p.start,
+      p.end,
+      p.counts,
+      p.rawY.toFixed(3),
+      p.fdr != null ? p.fdr.toExponential(3) : "",
+      p.distance
+    ]);
+    const csv = [header, ...rows].map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${focal}_partners.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -428,7 +451,7 @@ export default function Page() {
           <section className="border rounded-2xl p-4 shadow-sm space-y-3">
             <div className="font-semibold">Filters</div>
 
-            <label className="text-xs text-gray-600">Min counts: {minCounts}</label>
+            <label className="text-xs text-gray-600">Min <span><em>i</em><sub>o</sub></span>: {minCounts}</label>
             <input
               type="range"
               min={0}
@@ -439,18 +462,9 @@ export default function Page() {
               className="w-full"
             />
 
-            <label className="text-xs text-gray-600">Min distance (bp): {minDistance}</label>
-            <input
-              type="range"
-              min={0}
-              max={20000}
-              step={500}
-              value={minDistance}
-              onChange={e => setMinDistance(Number(e.target.value))}
-              className="w-full"
-            />
+            {/* Distance slider removed */}
 
-            <label className="text-xs text-gray-600">Y cap (odds ratio): {yCap}</label>
+            <label className="text-xs text-gray-600">Y cap (odds ratio <span><em>O</em><sup>f</sup></span>): {yCap}</label>
             <input
               type="range"
               min={100}
@@ -461,7 +475,7 @@ export default function Page() {
               className="w-full"
             />
 
-            <label className="text-xs text-gray-600">Label threshold: {labelThreshold}</label>
+            <label className="text-xs text-gray-600">Label threshold (<span><em>O</em><sup>f</sup></span>): {labelThreshold}</label>
             <input
               type="range"
               min={0}
@@ -472,7 +486,6 @@ export default function Page() {
               className="w-full"
             />
 
-            {/* NEW: circle size scale */}
             <label className="text-xs text-gray-600">Circle size scale: ×{sizeScaleFactor.toFixed(1)}</label>
             <input
               type="range"
@@ -507,8 +520,8 @@ export default function Page() {
           <section className="border rounded-2xl p-4 shadow-sm space-y-2">
             <div className="font-semibold">Data</div>
             <div className="flex gap-2 flex-wrap">
-              <button className="border rounded px-3 py-1" onClick={() => setData(simulateData(500))}>
-                Simulate
+              <button className="border rounded px-3 py-1" onClick={() => setData(simulateData(650))}>
+                Simulate (dense)
               </button>
               <button className="border rounded px-3 py-1" onClick={downloadSVG}>
                 Export SVG
@@ -538,7 +551,6 @@ export default function Page() {
                 Choose File
               </button>
             </div>
-            
             <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
 
             <div className="text-xs text-gray-600 pt-2 flex items-center gap-2">
@@ -566,7 +578,6 @@ export default function Page() {
                 <option value="preset-bs">Anno_BS.csv</option>
               </select>
             </div>
-            {/* custom file button to avoid inline filename */}
             <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
             <button
               className="border rounded px-3 py-1"
@@ -579,13 +590,13 @@ export default function Page() {
 
             <div className="text-[11px] text-gray-600 mt-3 space-y-1">
               <div><span className="font-semibold">Headers —</span></div>
-              <div><span className="font-medium">Interactions CSV:</span> <code>ref, target, counts, odds_ratio, …</code></div>
+              <div><span className="font-medium">Interactions CSV:</span> <code>ref, target, counts, odds_ratio, fdr, …</code></div>
               <div><span className="font-medium">Annotations CSV:</span> <code>gene_name, start, end, feature_type, strand, chromosome</code></div>
             </div>
           </section>
         </div>
 
-        {/* Scatter + legend + full partner table */}
+        {/* Scatter + legend + table */}
         <div className="col-span-12 lg:col-span-9 space-y-4">
           <section className="border rounded-2xl p-4 shadow-sm">
             <ScatterPlot
@@ -643,8 +654,14 @@ export default function Page() {
                 )}{" "}
                 <span className="text-xs text-gray-400">({partners.length} shown)</span>
               </div>
-              <div className="text-xs text-gray-500">sorted by odds ratio</div>
+              <div className="flex items-center gap-2">
+                <div className="text-xs text-gray-500">sorted by <em>O</em><sup>f</sup></div>
+                <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
+                  Export table CSV
+                </button>
+              </div>
             </div>
+
             <div className="overflow-auto max-h-[500px]">
               <table className="min-w-full text-sm">
                 <thead className="sticky top-0 bg-white text-left text-gray-600">
@@ -652,12 +669,10 @@ export default function Page() {
                     <th className="py-1 pr-4">Partner</th>
                     <th className="py-1 pr-4">Feature</th>
                     <th className="py-1 pr-4">Start</th>
-                    <th className="py-1 pr-4">
-                      <span><em>i</em><sub>o</sub></span> (chimeras)
-                    </th>
-                    <th className="py-1 pr-4">
-                      odds ratio (<em>O</em><sup>f</sup>)
-                    </th>
+                    <th className="py-1 pr-4">End</th>
+                    <th className="py-1 pr-4"><span><em>i</em><sub>o</sub></span></th>
+                    <th className="py-1 pr-4"><span><em>O</em><sup>f</sup></span></th>
+                    <th className="py-1 pr-4">FDR</th>
                     <th className="py-1 pr-4">Distance</th>
                   </tr>
                 </thead>
@@ -669,7 +684,7 @@ export default function Page() {
                       <tr
                         key={row.partner}
                         className="hover:bg-gray-50 cursor-pointer"
-                        onClick={() => setFocal(row.partner)}
+                        onClick={() => setFocal(row.partner)} // opens globalMAP centered on partner
                       >
                         <td className="py-1 pr-4 text-blue-700" style={{ fontStyle: dispName.italic ? "italic" : "normal" }}>
                           {dispName.text}
@@ -682,15 +697,17 @@ export default function Page() {
                           {typeDisp.label}
                         </td>
                         <td className="py-1 pr-4">{row.start}</td>
+                        <td className="py-1 pr-4">{row.end}</td>
                         <td className="py-1 pr-4">{row.counts}</td>
                         <td className="py-1 pr-4">{row.rawY.toFixed(1)}</td>
+                        <td className="py-1 pr-4">{row.fdr != null ? row.fdr.toExponential(2) : "—"}</td>
                         <td className="py-1 pr-4">{row.distance}</td>
                       </tr>
                     );
                   })}
                   {partners.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-2 text-gray-500">
+                      <td colSpan={8} className="py-2 text-gray-500">
                         No partners after filters.
                       </td>
                     </tr>
@@ -701,33 +718,9 @@ export default function Page() {
           </section>
         </div>
       </main>
-
-      {/* Help / quick guide (appears below the GlobalMAP UI) */}
-      <section className="mx-auto max-w-7xl p-4">
-        <div className="border rounded-2xl p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <div className="font-semibold">GlobalMAP quick guide</div>
-            <a
-              href="/GlobalHelp.png"
-              download
-              className="text-xs text-blue-600 hover:underline"
-            >
-              Download PNG
-            </a>
-          </div>
-
-          <img
-            src="/GlobalHelp.png"
-            alt="Annotated GlobalMAP screenshot showing search, filters, feature types, axes, highlighting, and labels."
-            loading="lazy"
-            className="mt-2 w-full h-auto rounded-lg border"
-          />
-        </div>
-      </section>
     </div>
   );
 }
-
 
 function ScatterPlot({
   focal,
@@ -762,14 +755,13 @@ function ScatterPlot({
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
 
-  // scale by [genomeStart, genomeEnd] so positions align exactly
   const xScale = (x: number) => ((x - genomeStart) / genomeLen) * innerW;
   const yScale = (v: number) => {
     const t = symlog(v, 10, 10);
     const tMax = symlog(yCap, 10, 10);
     return innerH - (t / tMax) * innerH;
   };
-  const sizeScale = (c: number) => (Math.sqrt(c) * 2 + 4) * sizeScaleFactor; // √counts scaling with user factor
+  const sizeScale = (c: number) => (Math.sqrt(c) * 2 + 4) * sizeScaleFactor;
 
   const sorted = [...partners].sort((a, b) => b.rawY - a.rawY);
   const placed: { x: number; y: number }[] = [];
@@ -784,7 +776,6 @@ function ScatterPlot({
     })
     .slice(0, 80);
 
-  // X-axis ticks at 0.5, 1.0, ..., 4.5 Mb (only those within genomeLen)
   const mbTicks = Array.from({ length: 9 }, (_, i) => 0.5 + i * 0.5)
     .filter(m => m * 1_000_000 <= genomeLen);
 
@@ -794,7 +785,7 @@ function ScatterPlot({
         <defs>
           <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#1f2937;font-size:10px}.axis-label{font-size:11px}`}</style>
         </defs>
-        <g transform={`translate(${margin.left},${margin.top})`}>
+        <g transform={`translate(${margin.left},${margin.top})`}>          
           {/* X-axis */}
           <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
           {mbTicks.map((m, i) => {
@@ -822,7 +813,7 @@ function ScatterPlot({
             Odds ratio
           </text>
 
-          {/* focal marker at midpoint and with total chimeras */}
+          {/* focal marker */}
           {focalAnn && (
             <g>
               {(() => {
@@ -860,7 +851,7 @@ function ScatterPlot({
             );
           })}
 
-          {/* labels (gene names) */}
+          {/* labels */}
           {labels.map((p, i) => {
             const disp = formatGeneName(p.partner, partners.find(q => q.partner === p.partner)?.type);
             return (

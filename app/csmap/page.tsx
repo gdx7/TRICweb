@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 
+/* ---------- Types ---------- */
 type FeatureType =
   | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
 
@@ -27,6 +28,7 @@ type Pair = {
   target_type?: FeatureType;
 };
 
+/* ---------- Colors ---------- */
 const FEATURE_COLORS: Record<FeatureType, string> = {
   ncRNA: "#A40194",
   sRNA:  "#A40194",
@@ -38,7 +40,10 @@ const FEATURE_COLORS: Record<FeatureType, string> = {
   "5'UTR":"#76AAD7",
   "3'UTR":"#0C0C0C",
 };
+
 const cf = (s: string) => String(s || "").trim().toLowerCase();
+
+/* ----- display helpers ----- */
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
   const t = (type || "CDS") as FeatureType;
@@ -46,71 +51,64 @@ function formatGeneName(name: string, type?: FeatureType): { text: string; itali
   return { text: name, italic: true };
 }
 
-// ---------- Simulated dense dataset ----------
-function simulateData(nGenes = 320) {
-  const rng = ((seed: number) => () => (seed = (seed * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(17);
-  const annotations: Annotation[] = [];
-  const genomeLen = 4_600_000;
+/* ---------- Lightweight simulation (fast) ---------- */
+function simulateCS(nGenes = 120) {
+  const rng = ((x:number)=>()=> (x = (x*1664525+1013904223)%0xffffffff)/0xffffffff)(1337);
+  const ann: Annotation[] = [];
+  const genomeLen = 2_300_000;
 
+  // CDS + UTRs
   for (let i = 1; i <= nGenes; i++) {
     const start = Math.floor(rng() * (genomeLen - 2000)) + 1;
-    const len = Math.max(150, Math.floor(rng() * 1500));
+    const len = 300 + Math.floor(rng() * 800);
     const end = Math.min(start + len, genomeLen);
-    annotations.push({ gene_name: `gene${i}`, start, end, feature_type: "CDS", strand: rng() > 0.5 ? "+" : "-", chromosome: "chr" });
-
-    if (rng() > 0.4) {
-      const u5s = Math.max(1, start - Math.floor(rng() * 200));
-      const u5e = Math.min(start + Math.floor(len * 0.25), genomeLen);
-      annotations.push({ gene_name: `5'gene${i}`, start: u5s, end: u5e, feature_type: "5'UTR", strand: "+", chromosome: "chr" });
-    }
-    if (rng() > 0.4) {
-      const u3s = Math.max(end - Math.floor(len * 0.25), 1);
-      const u3e = Math.min(end + Math.floor(rng() * 200), genomeLen);
-      annotations.push({ gene_name: `3'gene${i}`, start: u3s, end: u3e, feature_type: "3'UTR", strand: "+", chromosome: "chr" });
-    }
+    ann.push({ gene_name: `gene${i}`, start, end, feature_type: "CDS", strand: rng() > 0.5 ? "+" : "-" });
+    if (rng() > 0.5) ann.push({ gene_name: `5'gene${i}`, start: Math.max(1, start - 120), end: start + 60, feature_type: "5'UTR" });
+    if (rng() > 0.5) ann.push({ gene_name: `3'gene${i}`, start: end - 60, end: Math.min(end + 120, genomeLen), feature_type: "3'UTR" });
   }
-  for (let i = 1; i <= Math.floor(nGenes * 0.12); i++) {
-    const start = Math.floor(rng() * (genomeLen - 400)) + 1;
-    const end = Math.min(start + 200 + Math.floor(rng() * 250), genomeLen);
-    const t = rng() < 0.6 ? "sRNA" : "ncRNA";
-    annotations.push({ gene_name: `${t.toLowerCase()}${i}`, start, end, feature_type: t, strand: "+", chromosome: "chr" });
+  // sRNAs/ncRNAs
+  for (let i = 1; i <= 12; i++) {
+    const s = Math.floor(rng() * (genomeLen - 300)) + 1;
+    ann.push({ gene_name: `srna${i}`, start: s, end: s + 160, feature_type: "sRNA", strand: "+" });
   }
-  for (let i = 1; i <= Math.floor(nGenes * 0.03); i++) {
-    const start = Math.floor(rng() * (genomeLen - 400)) + 1;
-    const end = Math.min(start + 200 + Math.floor(rng() * 250), genomeLen);
-    annotations.push({ gene_name: `sponge${i}`, start, end, feature_type: "sponge", strand: "+", chromosome: "chr" });
+  for (let i = 1; i <= 6; i++) {
+    const s = Math.floor(rng() * (genomeLen - 300)) + 1;
+    ann.push({ gene_name: `ncrna${i}`, start: s, end: s + 220, feature_type: "ncRNA", strand: "+" });
   }
 
   const pairs: Pair[] = [];
-  const genes = annotations.map(a => a.gene_name);
-  function addEdge(a: string, b: string, bias = 1) {
-    const counts = Math.max(1, Math.floor((rng() ** 0.8) * 220 * bias));
-    const or = 0.8 + Math.pow(rng(), 0.35) * 650 * bias;
-    const aAnn = annotations.find(x => x.gene_name === a);
-    const bAnn = annotations.find(x => x.gene_name === b);
+  const genes = ann.map(a => a.gene_name);
+  const withType = (g: string) => ann.find(a => a.gene_name === g)?.feature_type;
+
+  function add(ref: string, target: string, bias=1) {
+    const counts = 10 + Math.floor(Math.pow(rng(), 0.6) * 200 * bias);
+    const or = 1 + Math.pow(rng(), 0.3) * 1000 * bias;
     pairs.push({
-      ref: a, target: b, counts, odds_ratio: or,
-      totals: Math.floor(2000 + rng() * 20000),
-      total_ref: Math.floor(2000 + rng() * 20000),
-      ref_type: aAnn?.feature_type, target_type: bAnn?.feature_type,
+      ref, target, counts, odds_ratio: or,
+      totals: counts * 6, total_ref: counts * 7,
+      ref_type: withType(ref), target_type: withType(target)
     });
   }
-  for (let k = 0; k < nGenes * 4; k++) {
+
+  // sRNA hubs
+  const sLike = ann.filter(a => a.feature_type === "sRNA" || a.feature_type === "ncRNA").map(a => a.gene_name);
+  for (const s of sLike) {
+    for (let k = 0; k < 18; k++) {
+      const tgt = genes[Math.floor(rng() * genes.length)];
+      if (tgt !== s) add(s, tgt, 4);
+    }
+  }
+  // background
+  for (let k = 0; k < nGenes * 3; k++) {
     const a = genes[Math.floor(rng() * genes.length)];
     const b = genes[Math.floor(rng() * genes.length)];
-    if (a === b) continue;
-    addEdge(a, b, 1);
-  }
-  const sLike = annotations.filter(a => a.feature_type === "sRNA" || a.feature_type === "ncRNA").map(a => a.gene_name);
-  if (sLike.length > 0) {
-    const pick = (n: number) => Array.from({ length: n }, () => genes[Math.floor(rng() * genes.length)]);
-    pick(100).forEach(g => addEdge(sLike[Math.floor(rng() * sLike.length)], g, 4));
+    if (a !== b) add(a, b, 1);
   }
 
-  return { annotations, pairs };
+  return { ann, pairs };
 }
 
-// ---------- CSV parsing ----------
+/* ---------- CSV parsing ---------- */
 function parsePairsCSV(csv: string): Pair[] {
   const { data } = Papa.parse<Pair>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
   return (data as any[])
@@ -126,6 +124,7 @@ function parsePairsCSV(csv: string): Pair[] {
       target_type: r.target_type,
     }));
 }
+
 function parseAnnoCSV(csv: string): Annotation[] {
   const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
   return (data as any[])
@@ -140,13 +139,15 @@ function parseAnnoCSV(csv: string): Annotation[] {
     }));
 }
 
+/* ---------- Export helper ---------- */
 function exportSVG(svgId: string, filename: string) {
   const el = document.getElementById(svgId) as SVGSVGElement | null;
   if (!el) return;
   const clone = el.cloneNode(true) as SVGSVGElement;
   const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
   const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-  style.textContent = 'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}';
+  style.textContent =
+    'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}';
   defs.appendChild(style);
   clone.insertBefore(defs, clone.firstChild);
   const ser = new XMLSerializer();
@@ -154,29 +155,39 @@ function exportSVG(svgId: string, filename: string) {
   const blob = new Blob([str], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = filename.endsWith(".svg") ? filename : `${filename}.svg`; a.click(); URL.revokeObjectURL(url);
+  a.href = url;
+  a.download = filename.endsWith(".svg") ? filename : `${filename}.svg`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
+/* ---------- Page ---------- */
 export default function CsMapPage() {
-  // Simulated data by default
-  const sim = useMemo(() => simulateData(320), []);
-  const [pairs, setPairs] = useState<Pair[]>(sim.pairs);
-  const [anno, setAnno] = useState<Annotation[]>(sim.annotations);
+  // FAST demo defaults
+  const demo = useMemo(() => simulateCS(120), []);
+  const [pairs, setPairs] = useState<Pair[]>(demo.pairs);
+  const [anno, setAnno] = useState<Annotation[]>(demo.ann);
 
-  // Pre-fill genes; accept ?genes=a,b,c from globalMAP
-  const [genesInput, setGenesInput] = useState<string>("gene1, gene2, 5'gene3");
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const g = new URLSearchParams(window.location.search).get("genes");
-    if (g) setGenesInput(g);
-  }, []);
-
+  // prefill with demo-visible names; overridden by ?genes= if present
+  const [genesInput, setGenesInput] = useState<string>("srna1, gene10, gene20");
   const [sizeScaleFactor, setSizeScaleFactor] = useState<number>(1.0);
+
+  // show loaded names like globalMAP
   const [loadedPairsName, setLoadedPairsName] = useState<string | null>(null);
   const [loadedAnnoName, setLoadedAnnoName] = useState<string | null>(null);
+
   const pairsRef = useRef<HTMLInputElement>(null);
   const annoRef = useRef<HTMLInputElement>(null);
 
+  // parse query string safely (no useSearchParams => no prerender errors)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const gs = sp.get("genes");
+    if (gs) setGenesInput(gs);
+  }, []);
+
+  // case-insensitive index for annotations
   const annoByCF = useMemo(() => {
     const m = new Map<string, Annotation>();
     for (const a of anno) m.set(cf(a.gene_name), a);
@@ -195,12 +206,14 @@ export default function CsMapPage() {
     setAnno(parseAnnoCSV(text));
     setLoadedAnnoName(f.name);
   }
+
   async function loadPresetAnno(path: string, label?: string) {
     const res = await fetch(path);
     const text = await res.text();
     setAnno(parseAnnoCSV(text));
     if (label) setLoadedAnnoName(label);
   }
+
   async function loadPairsFromURL(url: string) {
     const res = await fetch(url);
     const text = await res.text();
@@ -213,13 +226,14 @@ export default function CsMapPage() {
     [genesInput]
   );
 
+  /* ---------- Build csMAP dots + totals ---------- */
   const { dots, totals, warnings } = useMemo(() => {
     const warnings: string[] = [];
     const dots: { col: number; yT: number; r: number; stroke: string }[] = [];
     const totals: { gene: string; total: number; type?: FeatureType }[] = [];
 
     const COUNT_MIN = 10;
-    const DIST_MIN = 5000;
+    const DIST_MIN = 5000; // bp
     const OR_CAP = 5000;
     const LINTHRESH = 10;
 
@@ -233,6 +247,7 @@ export default function CsMapPage() {
       const annG = annoByCF.get(gCF);
       if (!annG) warnings.push(`No annotation for ${gRaw}`);
 
+      // totals
       let total = 0;
       for (const e of pairs) {
         if (cf(e.ref) === gCF && e.total_ref) { total = e.total_ref; break; }
@@ -240,6 +255,7 @@ export default function CsMapPage() {
       }
       totals.push({ gene: gRaw, total: Math.max(0, Math.floor(total)), type: annG?.feature_type });
 
+      // collect candidates
       const cand: { pos: number; or: number; counts: number; type: FeatureType }[] = [];
       for (const e of pairs) {
         const isRef = cf(e.ref) === gCF;
@@ -248,14 +264,15 @@ export default function CsMapPage() {
 
         const partner = isRef ? e.target : e.ref;
         const annP = annoByCF.get(cf(partner));
-        if (!annP || !annG) continue;
+        if (!annP) continue;
 
         const dist = Math.min(
-          Math.abs(annP.start - annG.end),
-          Math.abs(annP.end - annG.start),
-          Math.abs(annP.start - annG.start),
-          Math.abs(annP.end - annG.end)
+          Math.abs(annP.start - (annG?.end ?? annP.end)),
+          Math.abs(annP.end - (annG?.start ?? annP.start)),
+          Math.abs(annP.start - (annG?.start ?? annP.start)),
+          Math.abs(annP.end - (annG?.end ?? annP.end))
         );
+
         const counts = Number(e.counts) || 0;
         const or = Number(e.odds_ratio) || 0;
         const type = (isRef ? e.target_type : e.ref_type) || annP.feature_type || "CDS";
@@ -268,13 +285,18 @@ export default function CsMapPage() {
         cand.push({ pos: annP.start, or, counts, type: type as FeatureType });
       }
 
+      // 1 kb local maxima; big counts first
       cand.sort((a, b) => a.pos - b.pos);
       const peaks: typeof cand = [];
       let cur = cand[0];
       for (let i = 1; i < cand.length; i++) {
         const nx = cand[i];
-        if (nx.pos > cur.pos + 1000) { peaks.push(cur); cur = nx; }
-        else if (nx.or > cur.or) { cur = nx; }
+        if (nx.pos > cur.pos + 1000) {
+          peaks.push(cur);
+          cur = nx;
+        } else if (nx.or > cur.or) {
+          cur = nx;
+        }
       }
       if (cur) peaks.push(cur);
       peaks.sort((a, b) => b.counts - a.counts);
@@ -282,7 +304,7 @@ export default function CsMapPage() {
       for (const p of peaks) {
         const y = Math.min(OR_CAP, p.or);
         const yT = symlog(y);
-        const r = Math.sqrt(p.counts) * 1.5 * sizeScaleFactor; // area ∝ counts
+        const r = Math.sqrt(p.counts) * 1.5 * sizeScaleFactor; // area ∝ counts (no offset)
         dots.push({ col, yT, r, stroke: FEATURE_COLORS[p.type] || "#F78208" });
       }
     });
@@ -290,6 +312,7 @@ export default function CsMapPage() {
     return { dots, totals, warnings };
   }, [geneList, pairs, annoByCF, sizeScaleFactor]);
 
+  /* ---------- Layout / scales ---------- */
   const W = Math.max(560, 200 * Math.max(1, geneList.length));
   const SC_H = 560;
   const margin = { top: 40, right: 90, bottom: 88, left: 64 };
@@ -299,6 +322,7 @@ export default function CsMapPage() {
   const yMaxT = 1 + Math.log10(5000 / 10);
   const yPix = (t: number) => innerH - (t / yMaxT) * innerH;
 
+  // bar chart sizing
   const BAR_H = 340;
   const bMargin = { top: 28, right: 40, bottom: 74, left: 64 };
   const bInnerW = W - bMargin.left - bMargin.right;
@@ -307,7 +331,6 @@ export default function CsMapPage() {
   const tMax = Math.max(1, ...totals.map((t) => t.total));
   const log10 = (v: number) => (v <= 0 ? 0 : Math.log10(v));
   const barY = (v: number) => bInnerH - (log10(v) / log10(tMax || 1)) * bInnerH;
-
   const barW = Math.min(18, Math.max(12, bInnerW / (geneList.length * 3)));
   const maxPow = Math.ceil(log10(tMax || 1));
   const barTicks = Array.from({ length: maxPow + 1 }, (_, k) => Math.pow(10, k));
@@ -325,33 +348,54 @@ export default function CsMapPage() {
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <input
           className="border rounded px-3 py-2 w-full sm:w-[520px]"
-          placeholder="Enter genes (comma/space-separated), e.g., gene1, 5'gene2, srna3"
+          placeholder="Enter genes (comma/space-separated), e.g., srna1, gene10, gene20"
           value={genesInput}
           onChange={(e) => setGenesInput(e.target.value)}
         />
 
-        {/* Circle size slider */}
+        {/* Circle area scale */}
         <div className="flex items-center gap-2">
-          <div className="text-xs text-slate-700 whitespace-nowrap">Circle size ×{sizeScaleFactor.toFixed(1)}</div>
-          <input type="range" min={0.1} max={2} step={0.1} value={sizeScaleFactor} onChange={(e) => setSizeScaleFactor(Number(e.target.value))} />
+          <div className="text-xs text-slate-700 whitespace-nowrap">Circle area ×{sizeScaleFactor.toFixed(1)}</div>
+          <input
+            type="range"
+            min={0.5}
+            max={2}
+            step={0.1}
+            value={sizeScaleFactor}
+            onChange={(e) => setSizeScaleFactor(Number(e.target.value))}
+          />
         </div>
 
         <div className="flex-1" />
 
         <div className="flex flex-col sm:flex-row gap-6">
+          {/* Interactions: preset + file */}
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Interaction analysis CSV</div>
             <div className="flex items-center gap-2">
-              <select className="border rounded px-2 py-1 text-xs" defaultValue="" onChange={(e) => { const u = e.target.value; if (u) loadPairsFromURL(u); }}>
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                defaultValue=""
+                onChange={(e) => { const u = e.target.value; if (u) loadPairsFromURL(u); }}
+              >
                 <option value="" disabled>Select preset…</option>
-                {PRESETS.interactions.map(p => (<option key={p.url} value={p.url}>{p.label}</option>))}
+                {PRESETS.interactions.map(p => (
+                  <option key={p.url} value={p.url}>{p.label}</option>
+                ))}
               </select>
               <input ref={pairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
-              <button className="border rounded px-3 py-1" type="button" onClick={() => pairsRef.current?.click()}>Choose File</button>
+              <button
+                className="border rounded px-3 py-1"
+                type="button"
+                onClick={() => pairsRef.current?.click()}
+              >
+                Choose File
+              </button>
             </div>
-            <div className="text-xs text-slate-500 mt-1">{loadedPairsName || "(using simulated pairs)"}</div>
+            <div className="text-xs text-slate-500 mt-1">{loadedPairsName || "(demo data loaded)"}</div>
           </label>
 
+          {/* Annotations: preset + file */}
           <label className="text-sm">
             <div className="text-slate-700 mb-1">Annotations CSV</div>
             <div className="flex items-center gap-2">
@@ -378,21 +422,33 @@ export default function CsMapPage() {
                 <option value="preset-bs">Anno_BS.csv</option>
               </select>
               <input ref={annoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
-              <button className="border rounded px-3 py-1" type="button" onClick={() => annoRef.current?.click()}>Choose File</button>
+              <button
+                className="border rounded px-3 py-1"
+                type="button"
+                onClick={() => annoRef.current?.click()}
+              >
+                Choose File
+              </button>
             </div>
-            <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(using simulated annotations)"}</div>
+            <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(demo data loaded)"}</div>
           </label>
         </div>
       </div>
 
       {/* Collapsed scatter */}
       <div className="relative overflow-x-auto rounded-lg border bg-white">
-        <button onClick={() => exportSVG("csmap-scatter", "csMAP_scatter")} className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50">
+        <button
+          onClick={() => exportSVG("csmap-scatter", "csMAP_scatter")}
+          className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
+        >
           Export SVG
         </button>
         <svg id="csmap-scatter" width={W} height={SC_H} style={{ display: "block" }}>
-          <defs><style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style></defs>
+          <defs>
+            <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style>
+          </defs>
           <g transform={`translate(${margin.left},${margin.top})`}>
+            {/* axes */}
             <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
             {geneList.map((g, i) => {
               const cx = ((i + 0.5) / geneList.length) * innerW;
@@ -401,10 +457,13 @@ export default function CsMapPage() {
               return (
                 <g key={i} transform={`translate(${cx},${innerH})`}>
                   <line y2={6} stroke="#222" />
-                  <text y={24} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>{disp.text}</text>
+                  <text y={24} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
+                    {disp.text}
+                  </text>
                 </g>
               );
             })}
+            {/* y (symlog) ticks */}
             {[0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].map((v, i) => {
               const t = v <= 10 ? v / 10 : 1 + Math.log10(v / 10);
               return (
@@ -417,14 +476,20 @@ export default function CsMapPage() {
             })}
             <text transform={`translate(${-50},${innerH/2}) rotate(-90)`}>Odds ratio (symlog)</text>
 
+            {/* dots: big first, small last */}
             {dots.map((d, idx) => {
               const cx = ((d.col + 0.5) / geneList.length) * innerW + (Math.random() - 0.5) * 6;
               const cy = yPix(d.yT);
-              return <g key={idx} transform={`translate(${cx},${cy})`}><circle r={d.r} fill="#fff" stroke={d.stroke} strokeWidth={2} /></g>;
+              return (
+                <g key={idx} transform={`translate(${cx},${cy})`}>
+                  <circle r={d.r} fill="#fff" stroke={d.stroke} strokeWidth={2} />
+                </g>
+              );
             })}
           </g>
         </svg>
 
+        {/* Legend */}
         <div className="px-4 pb-4">
           <div className="mt-2 flex flex-wrap gap-4 items-center">
             <span className="text-sm font-medium">Feature types</span>
@@ -438,7 +503,10 @@ export default function CsMapPage() {
               { key: "sponge", color: FEATURE_COLORS.sponge, label: "Sponge" },
             ].map((item) => (
               <span key={item.key} className="inline-flex items-center gap-2 text-xs">
-                <span className="inline-block w-3 h-3 rounded-full border" style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }} />
+                <span
+                  className="inline-block w-3 h-3 rounded-full border"
+                  style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}
+                />
                 {item.label}
               </span>
             ))}
@@ -449,11 +517,16 @@ export default function CsMapPage() {
 
       {/* Totals bar chart */}
       <div className="relative overflow-x-auto rounded-lg border bg-white mt-6">
-        <button onClick={() => exportSVG("csmap-bars", "csMAP_totals")} className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50">
+        <button
+          onClick={() => exportSVG("csmap-bars", "csMAP_totals")}
+          className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
+        >
           Export SVG
         </button>
         <svg id="csmap-bars" width={W} height={BAR_H} style={{ display: "block" }}>
-          <defs><style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style></defs>
+          <defs>
+            <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style>
+          </defs>
           <g transform={`translate(${bMargin.left},${bMargin.top})`}>
             <line x1={0} y1={bInnerH} x2={bInnerW} y2={bInnerH} stroke="#222" />
             {barTicks.map((v, i) => {
@@ -486,7 +559,11 @@ export default function CsMapPage() {
         </svg>
       </div>
 
-      {warnings.length > 0 && (<div className="mt-3 text-xs text-amber-700">{warnings.join(" · ")}</div>)}
+      {warnings.length > 0 && (
+        <div className="mt-3 text-xs text-amber-700">
+          {warnings.join(" · ")}
+        </div>
+      )}
     </div>
   );
 }

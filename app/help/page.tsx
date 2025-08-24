@@ -13,7 +13,7 @@ export default function HelpPage() {
         <h1 className="text-2xl font-semibold mb-1">TRIC-seq explorer guide</h1>
         <p className="text-red-600 font-semibold">
           Important: after selecting a preset, please wait briefly while the site loads
-          the interaction and chimeras files.
+          the interaction and chimeras files. Once loaded you can interact with these dataset without delay.
         </p>
         <p className="text-slate-700">
           A quick guide to TRIC-seq and how to explore RNA–RNA interactions,
@@ -261,7 +261,7 @@ export default function HelpPage() {
               </li>
             </ol>
             <p className="bg-slate-50 border border-slate-200 rounded-md p-2">
-              <strong>Tip:</strong> rRNAs often recapitulate known 3D organization; mRNAs show ORF-centric domains tied to translation behavior.
+              <strong>Note:</strong> foldMAP provides average contact maps and may overlay different confirmations of the RNA.
             </p>
           </section>
 
@@ -277,13 +277,6 @@ export default function HelpPage() {
                 GitHub
               </a>
               .
-            </p>
-            <p>
-              Explore:{" "}
-              <Link href="/global" className="text-blue-600 hover:underline">globalMAP</Link> ·{" "}
-              <Link href="/csmap" className="text-blue-600 hover:underline">csMAP</Link> ·{" "}
-              <Link href="/pairmap" className="text-blue-600 hover:underline">pairMAP</Link> ·{" "}
-              <Link href="/foldmap" className="text-blue-600 hover:underline">foldMAP</Link>
             </p>
           </footer>
         </article>

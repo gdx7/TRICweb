@@ -115,13 +115,10 @@ export default function HelpPage() {
                   <li>
                     Search or highlight an RNA; adjust filters (min{" "}
                     <span><em>i</em><sub>o</sub></span>, min{" "}
-                    <span><em>O</em><sup><em>f</em></sup></span>).
+                    <span><em>O</em><sup><em>f</em></sup></span>, distance).
                   </li>
                   <li>
-                    In the partners table, <strong>check</strong> any RNAs of interest and use the carry buttons to open{" "}
-                    <Link href="/csmap" className="text-blue-600 hover:underline" target="_blank">csMAP</Link> or{" "}
-                    <Link href="/pairmap" className="text-blue-600 hover:underline" target="_blank">pairMAP</Link>{" "}
-                    in a new tab with those inputs prefilled.
+                    Check partners to build a “carry list,” then click <em>Open in csMAP</em> or <em>Open in pairMAP</em> — each tool opens in a new tab with inputs prefilled (fast; presets are optional).
                   </li>
                 </ol>
               </div>
@@ -148,20 +145,33 @@ export default function HelpPage() {
               <strong>What it shows:</strong> a genome-aware, RNA-centric map of all partners for a
               selected RNA. Points encode partner position,{" "}
               <span><em>O</em><sup><em>f</em></sup></span>,{" "}
-              <span><em>i</em><sub>o</sub></span>, and feature type. Circle area ∝ counts.
+              <span><em>i</em><sub>o</sub></span>, and feature type.
             </p>
             <h3 className="font-semibold">How to use</h3>
             <ol className="list-decimal pl-6 space-y-1">
               <li>Select a dataset preset for your species.</li>
-              <li>Search for an RNA (e.g., sRNA <code>GcvB</code> or CDS <em>uvrA</em>).</li>
+              <li>Search for an RNA (e.g., sRNA <code>GcvB</code> or CDS <code>uvrA</code>).</li>
               <li>
-                Tune filters and feature class; click any partner to recentre on it.
+                Tune filters: min <span><em>i</em><sub>o</sub></span>, min{" "}
+                <span><em>O</em><sup><em>f</em></sup></span>, distance, and feature class.
               </li>
               <li>
-                To analyze a subset elsewhere, check partners and click <strong>Open csMAP</strong> or{" "}
-                <strong>Open pairMAP</strong> to launch a new tab prefilled with your selections.
+                Check partners to add to the carry list; open <strong>csMAP</strong> or <strong>pairMAP</strong> in a new tab to continue.
               </li>
             </ol>
+            <p className="bg-slate-50 border border-slate-200 rounded-md p-2">
+              <strong>Tip:</strong> Sorting by{" "}
+              <span><em>O</em><sup><em>f</em></sup></span> surfaces the most specific targets first.
+              Use highlights to track hypotheses across refocusing steps.
+            </p>
+
+            <div className="mt-3 overflow-auto rounded border border-slate-200">
+              <img
+                src="/GlobalHelp.png"
+                alt="How to use globalMAP"
+                className="block max-w-full h-auto"
+              />
+            </div>
           </section>
 
           {/* csMAP */}
@@ -171,6 +181,21 @@ export default function HelpPage() {
               <strong>What it shows:</strong> collapsed (comparative) interaction profiles so you can
               place multiple RNAs side-by-side and compare their partner spectra.
             </p>
+            <h3 className="font-semibold">How to use</h3>
+            <ol className="list-decimal pl-6 space-y-1">
+              <li>Select a species preset.</li>
+              <li>Paste or edit the prefilled gene list (if you came from globalMAP).</li>
+              <li>
+                Adjust <span><em>i</em><sub>o</sub></span>/<span><em>O</em><sup><em>f</em></sup></span> thresholds and feature filters to reveal core vs. peripheral partners.
+              </li>
+              <li>
+                Differences in partner classes (5′UTR vs. CDS) often reflect regulatory logic; copy pairs to{" "}
+                <Link href="/pairmap" className="text-blue-600 hover:underline">
+                  pairMAP
+                </Link>{" "}
+                for interface-level inspection.
+              </li>
+            </ol>
           </section>
 
           {/* pairMAP */}
@@ -180,6 +205,20 @@ export default function HelpPage() {
               <strong>What it shows:</strong> a high-resolution inter-RNA heat map for a chosen pair
               (axes are nucleotide positions, binned).
             </p>
+            <h3 className="font-semibold">How to use</h3>
+            <ol className="list-decimal pl-6 space-y-1">
+              <li>Enter a Primary RNA and one or more Secondary RNAs (prefilled if you came from globalMAP).</li>
+              <li>Set Flank (±nt) and Bin (nt/bin) for resolution.</li>
+              <li>Interpret hotspot shape and position to infer mechanism.</li>
+            </ol>
+
+            <div className="mt-3 overflow-auto rounded border border-slate-200">
+              <img
+                src="/PairHelp.png"
+                alt="How to use pairMAP"
+                className="block max-w-full h-auto"
+              />
+            </div>
           </section>
 
           {/* foldMAP */}
@@ -188,6 +227,15 @@ export default function HelpPage() {
             <p>
               <strong>What it shows:</strong> an intramolecular (self-contact) map capturing an RNA’s
               average tertiary organization in vivo.
+            </p>
+            <h3 className="font-semibold">How to use</h3>
+            <ol className="list-decimal pl-6 space-y-1">
+              <li>Type a gene (demo opens on <em>gene10</em>) or pick your species preset.</li>
+              <li>Choose bin size to balance detail vs. noise.</li>
+              <li>Look for domains, boundaries, and interaction islands/deserts.</li>
+            </ol>
+            <p className="bg-slate-50 border border-slate-200 rounded-md p-2">
+              <strong>Tip:</strong> rRNAs often recapitulate known 3D organization; mRNAs show ORF-centric domains tied to translation behavior.
             </p>
           </section>
 

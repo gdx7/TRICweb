@@ -1,11 +1,20 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 
 type FeatureType =
-  | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
+  | "CDS"
+  | "5'UTR"
+  | "3'UTR"
+  | "ncRNA"
+  | "tRNA"
+  | "rRNA"
+  | "sRNA"
+  | "hkRNA"
+  | "sponge"
+  | string;
 
 type Annotation = {
   gene_name: string;
@@ -33,28 +42,28 @@ type ScatterRow = {
   x: number;
   start: number;
   end: number;
-  y: number;
-  rawY: number;
-  counts: number;
+  y: number;        // capped OR for plotting
+  rawY: number;     // true odds_ratio
+  counts: number;   // deduped counts
   type: FeatureType;
-  distance: number;
-  fdr?: number;
+  distance: number; // genomic midpoints distance
+  fdr?: number;     // min FDR across orientations, if present
 };
 
 const FEATURE_COLORS: Record<FeatureType, string> = {
   ncRNA: "#A40194",
-  sRNA:  "#A40194",
-  sponge:"#F12C2C",
-  tRNA:  "#82F778",
+  sRNA: "#A40194",
+  sponge: "#F12C2C",
+  tRNA: "#82F778",
   hkRNA: "#999999",
-  rRNA:  "#999999",
-  CDS:   "#F78208",
-  "5'UTR":"#76AAD7",
-  "3'UTR":"#0C0C0C",
+  rRNA: "#999999",
+  CDS: "#F78208",
+  "5'UTR": "#76AAD7",
+  "3'UTR": "#0C0C0C",
 };
 const pickColor = (ft?: FeatureType) => FEATURE_COLORS[ft || "CDS"] || "#F78208";
 
-// ---------- dense simulation used on first load ----------
+// --------- dense, fast simulation ----------
 function simulateData(nGenes = 650) {
   const rng = ((seed: number) => () => (seed = (seed * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(42);
   const ann: Annotation[] = [];
@@ -77,7 +86,6 @@ function simulateData(nGenes = 650) {
       ann.push({ gene_name: `3'gene${i}`, start: u3s, end: u3e, feature_type: "3'UTR", strand: "+", chromosome: "chr" });
     }
   }
-
   for (let i = 1; i <= Math.floor(nGenes * 0.11); i++) {
     const start = Math.floor(rng() * (genomeLen - 400)) + 1;
     const end = Math.min(start + 200 + Math.floor(rng() * 250), genomeLen);
@@ -113,7 +121,7 @@ function simulateData(nGenes = 650) {
   return { annotations: ann, pairs };
 }
 
-// ---------- helpers ----------
+// -------- helpers ----------
 function symlog(y: number, linthresh = 10, base = 10) {
   const s = Math.sign(y);
   const a = Math.abs(y);
@@ -143,21 +151,24 @@ export default function Page() {
   const [query, setQuery] = useState("");
   const [highlightQuery, setHighlightQuery] = useState("");
 
+  // persistent partner "carry list" (across focal changes and reloads)
+  const [carry, setCarry] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("tricCarry");
+      if (raw) setCarry(JSON.parse(raw));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem("tricCarry", JSON.stringify(carry));
+    } catch {}
+  }, [carry]);
+
   const filePairsRef = useRef<HTMLInputElement>(null);
   const fileAnnoRef = useRef<HTMLInputElement>(null);
   const [loadedPairsName, setLoadedPairsName] = useState<string | null>(null);
   const [loadedAnnoName, setLoadedAnnoName] = useState<string | null>(null);
-
-  // Selected partners “cart” (genes only)
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const toggleSelect = (name: string) => {
-    setSelected(prev => {
-      const s = new Set(prev);
-      if (s.has(name)) s.delete(name); else s.add(name);
-      return s;
-    });
-  };
-  const clearSelection = () => setSelected(new Set());
 
   const annotations = data.annotations;
   const pairs = data.pairs;
@@ -176,7 +187,7 @@ export default function Page() {
   }, [highlightQuery]);
 
   const partners = useMemo<ScatterRow[]>(() => {
-    const edges = pairs.filter(p => String(p.ref).trim() === focal || String(p.target).trim() === focal);
+    const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
     const acc = new Map<string, ScatterRow>();
 
     for (const e of edges) {
@@ -209,11 +220,21 @@ export default function Page() {
         prev.distance = Math.min(prev.distance, dist);
         if (fdr != null) prev.fdr = prev.fdr != null ? Math.min(prev.fdr, fdr) : fdr;
       } else {
-        acc.set(partner, { partner, x: partMid, start: partAnn.start, end: partAnn.end, y: Math.min(or, yCap), rawY: or, counts, type: type as FeatureType, distance: dist, fdr });
+        acc.set(partner, {
+          partner,
+          x: partMid,
+          start: partAnn.start,
+          end: partAnn.end,
+          y: Math.min(or, yCap),
+          rawY: or,
+          counts,
+          type: type as FeatureType,
+          distance: dist,
+          fdr,
+        });
       }
     }
 
-    // Fixed order (by Of); selection toggles won’t affect order
     return Array.from(acc.values())
       .filter(r => r.counts >= minCounts)
       .filter(r => !excludeTypes.includes(r.type))
@@ -231,7 +252,8 @@ export default function Page() {
       const c = Number(e.counts) || 0;
       seen.set(partner, Math.max(seen.get(partner) || 0, c));
     }
-    let sum = 0; seen.forEach(v => { sum += v; });
+    let sum = 0;
+    seen.forEach(v => { sum += v; });
     return sum;
   }, [pairs, focal]);
 
@@ -252,7 +274,7 @@ export default function Page() {
     if (match) setFocal(match);
   }
 
-  // CSV parsing
+  // ---- CSV parsing ----
   function parsePairsCSV(csv: string) {
     const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows: Pair[] = (data as any[])
@@ -274,6 +296,7 @@ export default function Page() {
       });
     return rows;
   }
+
   function parseAnnoCSV(csv: string) {
     const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows: Annotation[] = (data as any[])
@@ -288,21 +311,25 @@ export default function Page() {
       }));
     return rows;
   }
+
   async function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]; if (!file) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
     const text = await file.text();
     const parsed = parsePairsCSV(text);
     setData(prev => ({ ...prev, pairs: parsed }));
     setLoadedPairsName(file.name);
   }
   async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]; if (!file) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
     const text = await file.text();
     const parsed = parseAnnoCSV(text);
     setData(prev => ({ ...prev, annotations: parsed }));
     setLoadedAnnoName(file.name);
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
+
   async function loadPresetAnno(path: string, label: string) {
     const res = await fetch(path);
     const text = await res.text();
@@ -311,6 +338,7 @@ export default function Page() {
     setLoadedAnnoName(label);
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
+
   async function loadPairsFromURL(url: string) {
     const res = await fetch(url);
     const text = await res.text();
@@ -333,7 +361,8 @@ export default function Page() {
     setExcludeTypes(prev => {
       const active = types.every(t => prev.includes(t));
       if (active) return prev.filter(t => !types.includes(t));
-      const s = new Set(prev); types.forEach(t => s.add(t));
+      const s = new Set(prev);
+      types.forEach(t => s.add(t));
       return Array.from(s);
     });
   };
@@ -344,7 +373,8 @@ export default function Page() {
     const clone = el.cloneNode(true) as SVGSVGElement;
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-    style.textContent = 'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#1f2937;font-size:10px}.axis-label{font-size:11px}';
+    style.textContent =
+      'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#1f2937;font-size:10px}.axis-label{font-size:11px}';
     defs.appendChild(style);
     clone.insertBefore(defs, clone.firstChild);
     const ser = new XMLSerializer();
@@ -352,31 +382,46 @@ export default function Page() {
     const blob = new Blob([str], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `${focal}_interactome.svg`; a.click(); URL.revokeObjectURL(url);
+    a.href = url;
+    a.download = `${focal}_interactome.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
+  // Export partners table to CSV
   function exportPartnersCSV() {
     const header = ["Partner","Feature","Start","End","io","Of","FDR","Distance"];
     const rows = partners.map(p => [
-      p.partner, combinedLabel(p.type).label, p.start, p.end, p.counts, p.rawY.toFixed(3),
-      p.fdr != null ? p.fdr.toExponential(3) : "", p.distance
+      p.partner,
+      combinedLabel(p.type).label,
+      p.start,
+      p.end,
+      p.counts,
+      p.rawY.toFixed(3),
+      p.fdr != null ? p.fdr.toExponential(3) : "",
+      p.distance
     ]);
     const csv = [header, ...rows].map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `${focal}_partners.csv`; a.click(); URL.revokeObjectURL(url);
+    a.href = url;
+    a.download = `${focal}_partners.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
-  // Build URLs for cross-tool carry (genes only) — lowercase routes to avoid 404
-  const buildCsMapURL = () => {
-    const list = [focal, ...Array.from(selected)];
-    return `/csmap?genes=${encodeURIComponent(list.join(","))}`;
-  };
-  const buildPairMapURL = () => {
-    const list = Array.from(selected);
-    return `/pairmap?y=${encodeURIComponent(focal)}&x=${encodeURIComponent(list.join(","))}`;
-  };
+  function openCsMap() {
+    const genes = Array.from(new Set([focal, ...carry])).join(",");
+    if (!genes) return;
+    const url = `/csmap?genes=${encodeURIComponent(genes)}&source=global`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+  function openPairMap() {
+    if (carry.length === 0) return;
+    const url = `/pairmap?primary=${encodeURIComponent(focal)}&sec=${encodeURIComponent(carry.join(","))}&source=global`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 
   return (
     <div>
@@ -395,7 +440,7 @@ export default function Page() {
             <form onSubmit={handleSearchSubmit} className="flex gap-2 mb-2">
               <input
                 className="border rounded px-2 py-1 w-full"
-                placeholder="Enter RNA (e.g., gene42)"
+                placeholder="Enter RNA (e.g., GcvB)"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
               />
@@ -406,7 +451,7 @@ export default function Page() {
               <div className="text-xs text-gray-600 mb-1">Highlight genes (comma/space-separated)</div>
               <input
                 className="border rounded px-2 py-1 w-full"
-                placeholder="e.g., gene10, 5'gene20"
+                placeholder="e.g., gene20, srna3"
                 value={highlightQuery}
                 onChange={e => setHighlightQuery(e.target.value)}
               />
@@ -420,20 +465,52 @@ export default function Page() {
             <label className="text-xs text-gray-600">
               Min interactions (<span><em>i</em><sub>o</sub></span>): {minCounts}
             </label>
-            <input type="range" min={0} max={50} step={1} value={minCounts} onChange={e => setMinCounts(Number(e.target.value))} className="w-full" />
+            <input
+              type="range"
+              min={0}
+              max={50}
+              step={1}
+              value={minCounts}
+              onChange={e => setMinCounts(Number(e.target.value))}
+              className="w-full"
+            />
 
             <label className="text-xs text-gray-600">
               Y cap (odds ratio <span><em>O</em><sup><em>f</em></sup></span>): {yCap}
             </label>
-            <input type="range" min={100} max={5000} step={100} value={yCap} onChange={e => setYCap(Number(e.target.value))} className="w-full" />
+            <input
+              type="range"
+              min={100}
+              max={5000}
+              step={100}
+              value={yCap}
+              onChange={e => setYCap(Number(e.target.value))}
+              className="w-full"
+            />
 
             <label className="text-xs text-gray-600">
               Label threshold (<span><em>O</em><sup><em>f</em></sup></span>): {labelThreshold}
             </label>
-            <input type="range" min={0} max={500} step={5} value={labelThreshold} onChange={e => setLabelThreshold(Number(e.target.value))} className="w-full" />
+            <input
+              type="range"
+              min={0}
+              max={500}
+              step={5}
+              value={labelThreshold}
+              onChange={e => setLabelThreshold(Number(e.target.value))}
+              className="w-full"
+            />
 
-            <label className="text-xs text-gray-600">Circle size scale: ×{sizeScaleFactor.toFixed(1)}</label>
-            <input type="range" min={0.1} max={2} step={0.1} value={sizeScaleFactor} onChange={e => setSizeScaleFactor(Number(e.target.value))} className="w-full" />
+            <label className="text-xs text-gray-600">Circle area scale: ×{sizeScaleFactor.toFixed(1)}</label>
+            <input
+              type="range"
+              min={0.5}
+              max={2}
+              step={0.1}
+              value={sizeScaleFactor}
+              onChange={e => setSizeScaleFactor(Number(e.target.value))}
+              className="w-full"
+            />
 
             <div className="text-xs text-gray-700">
               Exclude types:
@@ -458,6 +535,7 @@ export default function Page() {
           <section className="border rounded-2xl p-4 shadow-sm space-y-2">
             <div className="font-semibold">Data</div>
             <div className="flex gap-2 flex-wrap">
+              {/* removed “Simulate (dense)” to keep panel clean */}
               <button className="border rounded px-3 py-1" onClick={downloadSVG}>
                 Export SVG
               </button>
@@ -478,7 +556,11 @@ export default function Page() {
             </div>
             <div>
               <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
-              <button className="border rounded px-3 py-1 w-full" onClick={() => filePairsRef.current?.click()} type="button">
+              <button
+                className="border rounded px-3 py-1 w-full"
+                onClick={() => filePairsRef.current?.click()}
+                type="button"
+              >
                 Choose File
               </button>
             </div>
@@ -510,7 +592,11 @@ export default function Page() {
               </select>
             </div>
             <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
-            <button className="border rounded px-3 py-1" onClick={() => fileAnnoRef.current?.click()} type="button">
+            <button
+              className="border rounded px-3 py-1"
+              onClick={() => fileAnnoRef.current?.click()}
+              type="button"
+            >
               Choose File
             </button>
             <div className="text-xs text-gray-500">{loadedAnnoName || "(using simulated annotations)"}</div>
@@ -553,7 +639,10 @@ export default function Page() {
                 { key: "sponge", color: pickColor("sponge"), label: "Sponge" },
               ].map(item => (
                 <span key={item.key} className="inline-flex items-center gap-2 text-xs">
-                  <span className="inline-block w-3 h-3 rounded-full border" style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }} />
+                  <span
+                    className="inline-block w-3 h-3 rounded-full border"
+                    style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}
+                  />
                   {item.label}
                 </span>
               ))}
@@ -561,99 +650,144 @@ export default function Page() {
             </div>
           </section>
 
-          {/* Selection toolbar & table (table does NOT refocus on click) */}
-          <section className="border rounded-2xl p-3 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div className="font-semibold">
-                Partners for{" "}
-                <span className="text-blue-600" style={{ fontStyle: formatGeneName(focal, geneIndex[focal]?.feature_type).italic ? "italic" : "normal" }}>
-                  {formatGeneName(focal, geneIndex[focal]?.feature_type).text}
-                </span>{" "}
-                {focalAnn && <span className="text-xs text-gray-500">({focalAnn.start}–{focalAnn.end})</span>}{" "}
-                <span className="text-xs text-gray-400">({partners.length} shown)</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-500">Selected: {selected.size}</div>
-                <button className="border rounded px-2 py-1 text-xs" onClick={() => { const s = new Set(selected); partners.forEach(p => s.add(p.partner)); setSelected(s); }}>
-                  Select shown
+          {/* Carry box */}
+          <section className="border rounded-2xl p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-semibold">Selected partners: {carry.length}</div>
+              <div className="flex gap-2">
+                <button
+                  className="border rounded px-2 py-1 text-xs disabled:opacity-50"
+                  onClick={openCsMap}
+                  disabled={carry.length === 0 && !focal}
+                  title="Opens csMAP in a new tab and pre-fills the genes input"
+                >
+                  Open in csMAP
                 </button>
-                <button className="border rounded px-2 py-1 text-xs" onClick={clearSelection}>
+                <button
+                  className="border rounded px-2 py-1 text-xs disabled:opacity-50"
+                  onClick={openPairMap}
+                  disabled={carry.length === 0}
+                  title="Opens pairMAP in a new tab with current RNA as primary and selected partners as secondary"
+                >
+                  Open in pairMAP
+                </button>
+                <button
+                  className="border rounded px-2 py-1 text-xs"
+                  onClick={() => setCarry([])}
+                  title="Clear the carry list"
+                >
                   Clear
                 </button>
-                <a href={buildCsMapURL()} target="_blank" rel="noreferrer" className={`border rounded px-2 py-1 text-xs ${selected.size === 0 ? "pointer-events-none opacity-50" : ""}`} title="Open csMAP with focal + selected partners (new tab)">
-                  Open csMAP
-                </a>
-                <a href={buildPairMapURL()} target="_blank" rel="noreferrer" className={`border rounded px-2 py-1 text-xs ${selected.size === 0 ? "pointer-events-none opacity-50" : ""}`} title="Open pairMAP with focal as primary (Y) and selected as secondary (X) (new tab)">
-                  Open pairMAP
-                </a>
+              </div>
+            </div>
+            {carry.length > 0 && (
+              <div className="text-xs text-gray-600">
+                {carry.join(", ")}
+              </div>
+            )}
+          </section>
+
+          <section className="border rounded-2xl p-4 shadow-sm">
+            <div className="flex justify-between items-center mb-3">
+              <div className="font-semibold">
+                Partners for{" "}
+                <button
+                  className="text-blue-600 hover:underline"
+                  style={{ fontStyle: formatGeneName(focal, geneIndex[focal]?.feature_type).italic ? "italic" : "normal" }}
+                  onClick={() => setFocal(focal)}
+                  title="Recenter on this RNA"
+                >
+                  {formatGeneName(focal, geneIndex[focal]?.feature_type).text}
+                </button>{" "}
+                {focalAnn && (
+                  <span className="text-xs text-gray-500">
+                    ({focalAnn.start}–{focalAnn.end})
+                  </span>
+                )}{" "}
+                <span className="text-xs text-gray-400">({partners.length} shown)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="text-xs text-gray-500">
+                  sorted by <em>O</em><sup><em>f</em></sup>
+                </div>
+                <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
+                  Export table CSV
+                </button>
               </div>
             </div>
 
-            <div className="mt-3 overflow-auto max-h-[520px]">
+            <div className="overflow-auto max-h-[500px]">
               <table className="min-w-full text-sm">
                 <thead className="sticky top-0 bg-white text-left text-gray-600">
                   <tr>
-                    <th className="py-1 pr-3">Pick</th>
-                    <th className="py-1 pr-3">Partner</th>
-                    <th className="py-1 pr-3">Feature</th>
-                    <th className="py-1 pr-3">Start</th>
-                    <th className="py-1 pr-3">End</th>
-                    <th className="py-1 pr-3"><span><em>i</em><sub>o</sub></span></th>
-                    <th className="py-1 pr-3"><span><em>O</em><sup><em>f</em></sup></span></th>
-                    <th className="py-1 pr-3">FDR</th>
-                    <th className="py-1 pr-3">Distance</th>
-                    <th className="py-1 pr-3">Focus</th>
+                    <th className="py-1 pr-4">Carry</th>
+                    <th className="py-1 pr-4">Partner</th>
+                    <th className="py-1 pr-4">Feature</th>
+                    <th className="py-1 pr-4">Start</th>
+                    <th className="py-1 pr-4">End</th>
+                    <th className="py-1 pr-4"><span><em>i</em><sub>o</sub></span></th>
+                    <th className="py-1 pr-4"><span><em>O</em><sup><em>f</em></sup></span></th>
+                    <th className="py-1 pr-4">FDR</th>
+                    <th className="py-1 pr-4">Distance</th>
                   </tr>
                 </thead>
                 <tbody>
                   {partners.map(row => {
                     const dispName = formatGeneName(row.partner, row.type);
                     const typeDisp = combinedLabel(row.type);
-                    const isSel = selected.has(row.partner);
+                    const checked = carry.includes(row.partner);
                     return (
-                      <tr key={row.partner} className={`${isSel ? "bg-blue-50" : ""}`}>
-                        <td className="py-1 pr-3 align-middle">
+                      <tr
+                        key={row.partner}
+                        className="hover:bg-gray-50"
+                        onClick={() => setFocal(row.partner)}
+                      >
+                        <td className="py-1 pr-4" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
-                            checked={isSel}
-                            onChange={() => toggleSelect(row.partner)}
+                            checked={checked}
+                            onChange={() => {
+                              setCarry(prev =>
+                                checked ? prev.filter(g => g !== row.partner) : Array.from(new Set([...prev, row.partner]))
+                              );
+                            }}
                           />
                         </td>
-                        <td className="py-1 pr-3 text-blue-700" style={{ fontStyle: dispName.italic ? "italic" : "normal" }}>
-                          {dispName.text}
-                        </td>
-                        <td className="py-1 pr-3">
-                          <span className="inline-block w-3 h-3 rounded-full mr-1" style={{ background: pickColor(row.type), border: "1px solid #333" }} />
-                          {typeDisp.label}
-                        </td>
-                        <td className="py-1 pr-3">{row.start}</td>
-                        <td className="py-1 pr-3">{row.end}</td>
-                        <td className="py-1 pr-3">{row.counts}</td>
-                        <td className="py-1 pr-3">{row.rawY.toFixed(1)}</td>
-                        <td className="py-1 pr-3">{row.fdr != null ? row.fdr.toExponential(2) : "—"}</td>
-                        <td className="py-1 pr-3">{row.distance}</td>
-                        <td className="py-1 pr-3">
-                          <button className="text-xs px-2 py-0.5 border rounded" onClick={() => setFocal(row.partner)}>
-                            Focus
+                        <td className="py-1 pr-4">
+                          <button
+                            className="text-blue-700 hover:underline"
+                            style={{ fontStyle: dispName.italic ? "italic" : "normal" }}
+                            onClick={(e) => { e.stopPropagation(); setFocal(row.partner); }}
+                            title="Open global map centered on this RNA"
+                          >
+                            {dispName.text}
                           </button>
                         </td>
+                        <td className="py-1 pr-4">
+                          <span
+                            className="inline-block w-3 h-3 rounded-full mr-1"
+                            style={{ background: pickColor(row.type), border: "1px solid #333" }}
+                          />
+                          {typeDisp.label}
+                        </td>
+                        <td className="py-1 pr-4">{row.start}</td>
+                        <td className="py-1 pr-4">{row.end}</td>
+                        <td className="py-1 pr-4">{row.counts}</td>
+                        <td className="py-1 pr-4">{row.rawY.toFixed(1)}</td>
+                        <td className="py-1 pr-4">{row.fdr != null ? row.fdr.toExponential(2) : "—"}</td>
+                        <td className="py-1 pr-4">{row.distance}</td>
                       </tr>
                     );
                   })}
                   {partners.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="py-2 text-gray-500">No partners after filters.</td>
+                      <td colSpan={9} className="py-2 text-gray-500">
+                        No partners after filters.
+                      </td>
                     </tr>
                   )}
                 </tbody>
               </table>
-            </div>
-
-            <div className="mt-3 flex items-center gap-2 justify-end">
-              <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
-                Export table CSV
-              </button>
             </div>
           </section>
         </div>
@@ -701,8 +835,8 @@ function ScatterPlot({
     const tMax = symlog(yCap, 10, 10);
     return innerH - (t / tMax) * innerH;
   };
-  // area ∝ counts -> radius ∝ sqrt(counts)
-  const sizeScale = (c: number) => Math.sqrt(Math.max(0, c)) * 3 * sizeScaleFactor;
+  // Circle area ∝ counts (no offset): radius ∝ √counts
+  const sizeScale = (c: number) => Math.sqrt(Math.max(0, c)) * 2 * sizeScaleFactor;
 
   const sorted = [...partners].sort((a, b) => b.rawY - a.rawY);
   const placed: { x: number; y: number }[] = [];
@@ -717,7 +851,8 @@ function ScatterPlot({
     })
     .slice(0, 80);
 
-  const mbTicks = Array.from({ length: 9 }, (_, i) => 0.5 + i * 0.5).filter(m => m * 1_000_000 <= genomeLen);
+  const mbTicks = Array.from({ length: 9 }, (_, i) => 0.5 + i * 0.5)
+    .filter(m => m * 1_000_000 <= genomeLen);
 
   return (
     <div className="w-full overflow-x-auto">
@@ -733,7 +868,9 @@ function ScatterPlot({
             return (
               <g key={i} transform={`translate(${xScale(xAbs)},${innerH})`}>
                 <line y2={6} stroke="#222" />
-                <text y={20} textAnchor="middle">{Number.isInteger(m) ? `${m.toFixed(0)} Mb` : `${m} Mb`}</text>
+                <text y={20} textAnchor="middle">
+                  {Number.isInteger(m) ? `${m.toFixed(0)} Mb` : `${m} Mb`}
+                </text>
               </g>
             );
           })}
@@ -747,7 +884,9 @@ function ScatterPlot({
               <line x1={0} x2={innerW} y1={0} y2={0} stroke="#eee" />
             </g>
           ))}
-          <text transform={`translate(${-44},${innerH/2}) rotate(-90)`} className="axis-label">Odds ratio</text>
+          <text transform={`translate(${-44},${innerH/2}) rotate(-90)`} className="axis-label">
+            Odds ratio
+          </text>
 
           {/* focal marker */}
           {focalAnn && (
@@ -769,7 +908,7 @@ function ScatterPlot({
           )}
 
           {/* points */}
-          {partners.slice().sort((a,b) => b.counts - a.counts).map((p, idx) => {
+          {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => {
             const highlighted = highlightSet.has(p.partner);
             const face = highlighted ? "#FFEB3B" : "#FFFFFF";
             return (
@@ -792,7 +931,9 @@ function ScatterPlot({
             const disp = formatGeneName(p.partner, partners.find(q => q.partner === p.partner)?.type);
             return (
               <g key={i} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
-                <text x={6} y={-6} style={{ fontStyle: disp.italic ? "italic" : "normal" }}>{disp.text}</text>
+                <text x={6} y={-6} style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
+                  {disp.text}
+                </text>
               </g>
             );
           })}

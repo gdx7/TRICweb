@@ -1,11 +1,9 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
-import Link from "next/link";
 import { PRESETS } from "@/lib/presets";
 
-/* ====== types & colors (unchanged) ====== */
 type FeatureType =
   | "CDS"
   | "5'UTR"
@@ -44,9 +42,9 @@ type ScatterRow = {
   x: number;
   start: number;
   end: number;
-  y: number;        // capped OR
-  rawY: number;     // true OR
-  counts: number;   // deduped counts
+  y: number;
+  rawY: number;
+  counts: number;
   type: FeatureType;
   distance: number;
   fdr?: number;
@@ -65,7 +63,7 @@ const FEATURE_COLORS: Record<FeatureType, string> = {
 };
 const pickColor = (ft?: FeatureType) => FEATURE_COLORS[ft || "CDS"] || "#F78208";
 
-/* ====== helpers & simulation (unchanged) ====== */
+// --------- denser simulation ----------
 function simulateData(nGenes = 650) {
   const rng = ((seed: number) => () => (seed = (seed * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(42);
   const ann: Annotation[] = [];
@@ -103,27 +101,39 @@ function simulateData(nGenes = 650) {
 
   const pairs: Pair[] = [];
   const genes = ann.map(a => a.gene_name);
+
   function addEdge(a: string, b: string, bias = 1) {
     const c = Math.max(1, Math.floor((rng() ** 0.8) * 200 * bias));
     const or = 0.8 + Math.pow(rng(), 0.35) * 650 * bias;
     const fdr = Math.pow(rng(), 4) * 0.2;
     const aAnn = ann.find(x => x.gene_name === a);
     const bAnn = ann.find(x => x.gene_name === b);
-    pairs.push({ ref: a, target: b, counts: c, odds_ratio: or, fdr, ref_type: aAnn?.feature_type, target_type: bAnn?.feature_type });
+    pairs.push({
+      ref: a,
+      target: b,
+      counts: c,
+      odds_ratio: or,
+      fdr,
+      ref_type: aAnn?.feature_type,
+      target_type: bAnn?.feature_type,
+    });
   }
+
   for (let k = 0; k < nGenes * 5; k++) {
-    const a = genes[Math.floor(Math.random() * genes.length)];
-    let b = genes[Math.floor(Math.random() * genes.length)];
+    const a = genes[Math.floor(rng() * genes.length)];
+    let b = genes[Math.floor(rng() * genes.length)];
     if (a === b) continue;
     addEdge(a, b, 1);
   }
+
   const sLike = ann.filter(a => a.feature_type === "sRNA" || a.feature_type === "ncRNA").map(a => a.gene_name);
-  const pick = (n: number) => Array.from({ length: n }, () => genes[Math.floor(Math.random() * genes.length)]);
-  if (sLike.length > 0) pick(120).forEach(g => addEdge(sLike[Math.floor(Math.random() * sLike.length)], g, 5));
+  const pick = (n: number) => Array.from({ length: n }, () => genes[Math.floor(rng() * genes.length)]);
+  if (sLike.length > 0) pick(120).forEach(g => addEdge(sLike[Math.floor(rng() * sLike.length)], g, 5));
 
   return { annotations: ann, pairs };
 }
 
+// -------- helpers ----------
 function symlog(y: number, linthresh = 10, base = 10) {
   const s = Math.sign(y);
   const a = Math.abs(y);
@@ -142,25 +152,45 @@ const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
   return { label: ft, italic: false };
 };
 
+// ---------- Page ----------
 export default function Page() {
-  const [data, setData] = useState(() => simulateData(650));
+  const [data, setData] = useState(() => simulateData(650)); // demo (dense)
   const [focal, setFocal] = useState<string>("srna1");
   const [minCounts, setMinCounts] = useState(5);
   const [yCap, setYCap] = useState(5000);
   const [labelThreshold, setLabelThreshold] = useState(50);
   const [sizeScaleFactor, setSizeScaleFactor] = useState(1);
-  const [sizeOffsetC, setSizeOffsetC] = useState(0); // NEW: c in √(counts + c)
   const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["tRNA"]);
   const [query, setQuery] = useState("");
   const [highlightQuery, setHighlightQuery] = useState("");
-
-  // NEW: multi-select for pairMAP/csMAP hand-offs
-  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const filePairsRef = useRef<HTMLInputElement>(null);
   const fileAnnoRef = useRef<HTMLInputElement>(null);
   const [loadedPairsName, setLoadedPairsName] = useState<string | null>(null);
   const [loadedAnnoName, setLoadedAnnoName] = useState<string | null>(null);
+
+  // --- remember/load last presets across tools (no UI clutter) ---
+  function remember(k: string, v: string) { try { localStorage.setItem(k, v); } catch {} }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const qs = new URLSearchParams(window.location.search);
+    const pairsQ = qs.get("pairs");
+    const annoQ = qs.get("anno");
+    const focalQ = qs.get("focal");
+    const hiQ = qs.get("highlight");
+    if (pairsQ) loadPairsFromURL(pairsQ);
+    if (annoQ) loadAnnoFromURL(annoQ);
+    if (focalQ) setFocal(focalQ);
+    if (hiQ) setHighlightQuery(hiQ);
+    if (!pairsQ && !annoQ) {
+      const lp = localStorage.getItem("TRIC_pairsURL");
+      const la = localStorage.getItem("TRIC_annoURL");
+      const laLabel = localStorage.getItem("TRIC_annoLabel") || null;
+      if (lp) loadPairsFromURL(lp);
+      if (la) loadAnnoFromURL(la, laLabel || undefined);
+    }
+  }, []);
 
   const annotations = data.annotations;
   const pairs = data.pairs;
@@ -260,10 +290,13 @@ export default function Page() {
     e.preventDefault();
     if (!query) return;
     const q = query.toLowerCase();
-    const match = allGenes.find(g => g.toLowerCase() === q) || allGenes.find(g => g.toLowerCase().includes(q));
+    const match =
+      allGenes.find(g => g.toLowerCase() === q) ||
+      allGenes.find(g => g.toLowerCase().includes(q));
     if (match) setFocal(match);
   }
 
+  // ---- CSV parsing ----
   function parsePairsCSV(csv: string) {
     const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows: Pair[] = (data as any[])
@@ -318,20 +351,28 @@ export default function Page() {
     setLoadedAnnoName(file.name);
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
   }
+
   async function loadPresetAnno(path: string, label: string) {
-    const res = await fetch(path);
+    await loadAnnoFromURL(path, label);
+  }
+  async function loadAnnoFromURL(url: string, label?: string) {
+    const res = await fetch(url);
     const text = await res.text();
     const parsed = parseAnnoCSV(text);
     setData(prev => ({ ...prev, annotations: parsed }));
-    setLoadedAnnoName(label);
+    setLoadedAnnoName(label || (new URL(url).pathname.split("/").pop() || "annotations.csv"));
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
+    remember("TRIC_annoURL", url);
+    remember("TRIC_annoLabel", label || "");
   }
+
   async function loadPairsFromURL(url: string) {
     const res = await fetch(url);
     const text = await res.text();
     const parsed = parsePairsCSV(text);
     setData(prev => ({ ...prev, pairs: parsed }));
     setLoadedPairsName(new URL(url).pathname.split("/").pop() || "interaction.csv");
+    remember("TRIC_pairsURL", url);
   }
 
   const EXCLUDE_GROUPS = [
@@ -360,7 +401,8 @@ export default function Page() {
     const clone = el.cloneNode(true) as SVGSVGElement;
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-    style.textContent = 'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#1f2937;font-size:10px}.axis-label{font-size:11px}';
+    style.textContent =
+      'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#1f2937;font-size:10px}.axis-label{font-size:11px}';
     defs.appendChild(style);
     clone.insertBefore(defs, clone.firstChild);
     const ser = new XMLSerializer();
@@ -374,6 +416,7 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
+  // Export partners table to CSV
   function exportPartnersCSV() {
     const header = ["Partner","Feature","Start","End","io","Of","FDR","Distance"];
     const rows = partners.map(p => [
@@ -396,15 +439,6 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
-  // selection helpers
-  const selectedList = useMemo(() => Array.from(selected), [selected]);
-  const pairHref = selectedList.length
-    ? `/pairmap?primary=${encodeURIComponent(focal)}&secondary=${encodeURIComponent(selectedList.join(","))}`
-    : "#";
-  const csHref = selectedList.length
-    ? `/csmap?compare=${encodeURIComponent([focal, ...selectedList].join(","))}`
-    : "#";
-
   return (
     <div>
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
@@ -422,7 +456,7 @@ export default function Page() {
             <form onSubmit={handleSearchSubmit} className="flex gap-2 mb-2">
               <input
                 className="border rounded px-2 py-1 w-full"
-                placeholder="Enter RNA (e.g., GcvB)"
+                placeholder="Enter RNA (e.g., gene12)"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
               />
@@ -433,7 +467,7 @@ export default function Page() {
               <div className="text-xs text-gray-600 mb-1">Highlight genes (comma/space-separated)</div>
               <input
                 className="border rounded px-2 py-1 w-full"
-                placeholder="e.g., dnaK, tufA, sRNA_12"
+                placeholder="e.g., gene1, 5'gene2, srna3"
                 value={highlightQuery}
                 onChange={e => setHighlightQuery(e.target.value)}
               />
@@ -447,40 +481,79 @@ export default function Page() {
             <label className="text-xs text-gray-600">
               Min interactions (<span><em>i</em><sub>o</sub></span>): {minCounts}
             </label>
-            <input type="range" min={0} max={50} step={1} value={minCounts} onChange={e => setMinCounts(Number(e.target.value))} className="w-full" />
-
-            <label className="text-xs text-gray-600">
-              Y cap (odds ratio <span><em>O</em><sup><em>f</em></sup></span>): {yCap}
-            </label>
-            <input type="range" min={100} max={5000} step={100} value={yCap} onChange={e => setYCap(Number(e.target.value))} className="w-full" />
-
-            <label className="text-xs text-gray-600">
-              Label threshold (<span><em>O</em><sup><em>f</em></sup></span>): {labelThreshold}
-            </label>
-            <input type="range" min={0} max={500} step={5} value={labelThreshold} onChange={e => setLabelThreshold(Number(e.target.value))} className="w-full" />
-
-            <label className="text-xs text-gray-600">Circle size scale: ×{sizeScaleFactor.toFixed(1)}</label>
-            <input type="range" min={0.1} max={2} step={0.1} value={sizeScaleFactor} onChange={e => setSizeScaleFactor(Number(e.target.value))} className="w-full" />
-
-            {/* NEW: circle area control */}
-            <label className="text-xs text-gray-600">Circle size offset (c): {sizeOffsetC}</label>
             <input
               type="range"
               min={0}
               max={50}
               step={1}
-              value={sizeOffsetC}
-              onChange={(e) => setSizeOffsetC(Number(e.target.value))}
+              value={minCounts}
+              onChange={e => setMinCounts(Number(e.target.value))}
+              className="w-full"
+            />
+
+            <label className="text-xs text-gray-600">
+              Y cap (odds ratio <span><em>O</em><sup><em>f</em></sup></span>): {yCap}
+            </label>
+            <input
+              type="range"
+              min={100}
+              max={5000}
+              step={100}
+              value={yCap}
+              onChange={e => setYCap(Number(e.target.value))}
+              className="w-full"
+            />
+
+            <label className="text-xs text-gray-600">
+              Label threshold (<span><em>O</em><sup><em>f</em></sup></span>): {labelThreshold}
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={500}
+              step={5}
+              value={labelThreshold}
+              onChange={e => setLabelThreshold(Number(e.target.value))}
+              className="w-full"
+            />
+
+            <label className="text-xs text-gray-600">Circle size scale: ×{sizeScaleFactor.toFixed(1)}</label>
+            <input
+              type="range"
+              min={0.1}
+              max={2}
+              step={0.1}
+              value={sizeScaleFactor}
+              onChange={e => setSizeScaleFactor(Number(e.target.value))}
               className="w-full"
             />
 
             <div className="text-xs text-gray-700">
               Exclude types:
               <div className="mt-1 flex flex-wrap gap-1">
-                {EXCLUDE_GROUPS.map(g => {
-                  const active = isGroupActive(g.types);
+                {[
+                  { label: "tRNA", types: ["tRNA"] as FeatureType[] },
+                  { label: "5'UTR", types: ["5'UTR"] as FeatureType[] },
+                  { label: "3'UTR", types: ["3'UTR"] as FeatureType[] },
+                  { label: "CDS", types: ["CDS"] as FeatureType[] },
+                  { label: "sponge", types: ["sponge"] as FeatureType[] },
+                  { label: "sRNA/ncRNA", types: ["sRNA","ncRNA"] as FeatureType[] },
+                  { label: "hkRNA/rRNA", types: ["hkRNA","rRNA"] as FeatureType[] },
+                ].map(g => {
+                  const active = g.types.every(t => excludeTypes.includes(t));
                   return (
-                    <button key={g.label} type="button" className={`px-2 py-1 rounded border ${active ? "bg-gray-200" : "bg-white"}`} onClick={() => toggleGroup(g.types)}>
+                    <button
+                      key={g.label}
+                      type="button"
+                      className={`px-2 py-1 rounded border ${active ? "bg-gray-200" : "bg-white"}`}
+                      onClick={() => {
+                        setExcludeTypes(prev => {
+                          const act = g.types.every(t => prev.includes(t));
+                          if (act) return prev.filter(t => !g.types.includes(t));
+                          const s = new Set(prev); g.types.forEach(t => s.add(t)); return Array.from(s);
+                        });
+                      }}
+                    >
                       {g.label}
                     </button>
                   );
@@ -491,34 +564,50 @@ export default function Page() {
 
           <section className="border rounded-2xl p-4 shadow-sm space-y-2">
             <div className="font-semibold">Data</div>
-            <div className="flex gap-2 flex-wrap">
-              <button className="border rounded px-3 py-1" onClick={() => { setData(simulateData(650)); setSelected(new Set()); }}>
-                Simulate (dense)
+
+            {/* Interactions */}
+            <div className="text-xs text-gray-600">Interaction analysis CSV</div>
+            <div className="mb-2">
+              <select
+                className="border rounded px-2 py-1 text-xs w-full"
+                defaultValue=""
+                onChange={(e) => { const u = e.target.value; if (u) loadPairsFromURL(u); }}
+              >
+                <option value="" disabled>Select preset…</option>
+                {PRESETS.interactions.map(p => (
+                  <option key={p.url} value={p.url}>{p.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
+              <button className="border rounded px-3 py-1" onClick={() => filePairsRef.current?.click()} type="button">
+                Choose File
               </button>
               <button className="border rounded px-3 py-1" onClick={downloadSVG}>
                 Export SVG
               </button>
             </div>
-
-            <div className="text-xs text-gray-600">Interaction analysis CSV</div>
-            <div className="mb-2">
-              <select className="border rounded px-2 py-1 text-xs w-full" defaultValue="" onChange={(e) => { const u = e.target.value; if (u) loadPairsFromURL(u); }}>
-                <option value="" disabled>Select preset…</option>
-                {PRESETS.interactions.map(p => (<option key={p.url} value={p.url}>{p.label}</option>))}
-              </select>
-            </div>
-            <div>
-              <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
-              <button className="border rounded px-3 py-1 w-full" onClick={() => filePairsRef.current?.click()} type="button">Choose File</button>
-            </div>
             <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
 
-            <div className="text-xs text-gray-600 pt-2 flex items-center gap-2">
-              <span>Annotations CSV</span>
-              <select className="border rounded px-2 py-1 text-xs" onChange={(e) => {
-                const map: Record<string, string> = { "preset-ec": "/Anno_EC.csv", "preset-ss": "/Anno_SS.csv", "preset-mx": "/Anno_MX.csv", "preset-sa": "/Anno_SA.csv", "preset-bs": "/Anno_BS.csv" };
-                const v = e.target.value; if (map[v]) loadPresetAnno(map[v], map[v].slice(1));
-              }} defaultValue="">
+            {/* Annotations */}
+            <div className="text-xs text-gray-600 pt-2">Annotations CSV</div>
+            <div className="flex items-center gap-2">
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                onChange={(e) => {
+                  const map: Record<string, string> = {
+                    "preset-ec": "/Anno_EC.csv",
+                    "preset-ss": "/Anno_SS.csv",
+                    "preset-mx": "/Anno_MX.csv",
+                    "preset-sa": "/Anno_SA.csv",
+                    "preset-bs": "/Anno_BS.csv",
+                  };
+                  const v = e.target.value;
+                  if (map[v]) loadPresetAnno(map[v], map[v].slice(1));
+                }}
+                defaultValue=""
+              >
                 <option value="" disabled>Select preset…</option>
                 <option value="preset-ec">Anno_EC.csv</option>
                 <option value="preset-ss">Anno_SS.csv</option>
@@ -526,15 +615,17 @@ export default function Page() {
                 <option value="preset-sa">Anno_SA.csv</option>
                 <option value="preset-bs">Anno_BS.csv</option>
               </select>
+              <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
+              <button className="border rounded px-3 py-1" onClick={() => fileAnnoRef.current?.click()} type="button">
+                Choose File
+              </button>
             </div>
-            <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
-            <button className="border rounded px-3 py-1" onClick={() => fileAnnoRef.current?.click()} type="button">Choose File</button>
             <div className="text-xs text-gray-500">{loadedAnnoName || "(using simulated annotations)"}</div>
 
             <div className="text-[11px] text-gray-600 mt-3 space-y-1">
               <div><span className="font-semibold">Headers —</span></div>
-              <div><span className="font-medium">Interactions CSV:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), …</code></div>
-              <div><span className="font-medium">Annotations CSV:</span> <code>gene_name, start, end, feature_type, strand, chromosome</code></div>
+              <div><span className="font-medium">Interactions:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), …</code></div>
+              <div><span className="font-medium">Annotations:</span> <code>gene_name, start, end, feature_type, strand, chromosome</code></div>
             </div>
           </section>
         </div>
@@ -554,7 +645,6 @@ export default function Page() {
               labelThreshold={labelThreshold}
               highlightSet={highlightSet}
               sizeScaleFactor={sizeScaleFactor}
-              sizeOffsetC={sizeOffsetC}  // NEW
               onClickPartner={(name) => setFocal(name)}
             />
 
@@ -570,34 +660,38 @@ export default function Page() {
                 { key: "sponge", color: pickColor("sponge"), label: "Sponge" },
               ].map(item => (
                 <span key={item.key} className="inline-flex items-center gap-2 text-xs">
-                  <span className="inline-block w-3 h-3 rounded-full border" style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }} />
+                  <span
+                    className="inline-block w-3 h-3 rounded-full border"
+                    style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}
+                  />
                   {item.label}
                 </span>
               ))}
-              <span className="ml-6 text-xs text-gray-500">
-                Circle area ∝ √(counts{sizeOffsetC > 0 ? ` + ${sizeOffsetC}` : ""})
-              </span>
+              <span className="ml-6 text-xs text-gray-500">Circle area ∝ counts (+1 offset)</span>
             </div>
           </section>
 
           <section className="border rounded-2xl p-4 shadow-sm">
-            <div className="flex flex-wrap gap-2 justify-between items-center mb-3">
+            <div className="flex justify-between items-center mb-3">
               <div className="font-semibold">
                 Partners for{" "}
-                <span className="text-blue-600" style={{ fontStyle: formatGeneName(focal, geneIndex[focal]?.feature_type).italic ? "italic" : "normal" }}>
+                <span
+                  className="text-blue-600"
+                  style={{ fontStyle: formatGeneName(focal, geneIndex[focal]?.feature_type).italic ? "italic" : "normal" }}
+                >
                   {formatGeneName(focal, geneIndex[focal]?.feature_type).text}
                 </span>{" "}
-                {focalAnn && (<span className="text-xs text-gray-500">({focalAnn.start}–{focalAnn.end})</span>)}{" "}
+                {focalAnn && (
+                  <span className="text-xs text-gray-500">
+                    ({focalAnn.start}–{focalAnn.end})
+                  </span>
+                )}{" "}
                 <span className="text-xs text-gray-400">({partners.length} shown)</span>
               </div>
-
               <div className="flex items-center gap-2">
-                <Link href={pairHref} aria-disabled={!selectedList.length} className={`border rounded px-2 py-1 text-xs ${selectedList.length ? "bg-white hover:bg-gray-50" : "opacity-50 cursor-not-allowed"}`}>
-                  Open selected in pairMAP →
-                </Link>
-                <Link href={csHref} aria-disabled={!selectedList.length} className={`border rounded px-2 py-1 text-xs ${selectedList.length ? "bg-white hover:bg-gray-50" : "opacity-50 cursor-not-allowed"}`}>
-                  Compare in csMAP →
-                </Link>
+                <div className="text-xs text-gray-500">
+                  sorted by <em>O</em><sup><em>f</em></sup>
+                </div>
                 <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
                   Export table CSV
                 </button>
@@ -608,7 +702,6 @@ export default function Page() {
               <table className="min-w-full text-sm">
                 <thead className="sticky top-0 bg-white text-left text-gray-600">
                   <tr>
-                    <th className="py-1 pr-3">Sel</th>
                     <th className="py-1 pr-4">Partner</th>
                     <th className="py-1 pr-4">Feature</th>
                     <th className="py-1 pr-4">Start</th>
@@ -623,27 +716,20 @@ export default function Page() {
                   {partners.map(row => {
                     const dispName = formatGeneName(row.partner, row.type);
                     const typeDisp = combinedLabel(row.type);
-                    const checked = selected.has(row.partner);
                     return (
-                      <tr key={row.partner} className="hover:bg-gray-50 cursor-pointer" onClick={() => setFocal(row.partner)}>
-                        <td className="py-1 pr-3" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              setSelected(prev => {
-                                const s = new Set(prev);
-                                if (s.has(row.partner)) s.delete(row.partner); else s.add(row.partner);
-                                return s;
-                              });
-                            }}
-                          />
-                        </td>
+                      <tr
+                        key={row.partner}
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={() => setFocal(row.partner)}
+                      >
                         <td className="py-1 pr-4 text-blue-700" style={{ fontStyle: dispName.italic ? "italic" : "normal" }}>
                           {dispName.text}
                         </td>
                         <td className="py-1 pr-4">
-                          <span className="inline-block w-3 h-3 rounded-full mr-1" style={{ background: pickColor(row.type), border: "1px solid #333" }} />
+                          <span
+                            className="inline-block w-3 h-3 rounded-full mr-1"
+                            style={{ background: pickColor(row.type), border: "1px solid #333" }}
+                          />
                           {typeDisp.label}
                         </td>
                         <td className="py-1 pr-4">{row.start}</td>
@@ -656,7 +742,11 @@ export default function Page() {
                     );
                   })}
                   {partners.length === 0 && (
-                    <tr><td colSpan={9} className="py-2 text-gray-500">No partners after filters.</td></tr>
+                    <tr>
+                      <td colSpan={8} className="py-2 text-gray-500">
+                        No partners after filters.
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
@@ -680,7 +770,6 @@ function ScatterPlot({
   labelThreshold,
   highlightSet,
   sizeScaleFactor,
-  sizeOffsetC,       // NEW
   onClickPartner,
 }: {
   focal: string;
@@ -694,7 +783,6 @@ function ScatterPlot({
   labelThreshold: number;
   highlightSet: Set<string>;
   sizeScaleFactor: number;
-  sizeOffsetC: number;
   onClickPartner: (gene: string) => void;
 }) {
   const width = 900;
@@ -709,8 +797,9 @@ function ScatterPlot({
     const tMax = symlog(yCap, 10, 10);
     return innerH - (t / tMax) * innerH;
   };
-  // NEW: area ∝ (counts + c) → r ∝ √(counts + c)
-  const sizeScale = (c: number) => (Math.sqrt(Math.max(0, c + sizeOffsetC)) * 2 + 4) * sizeScaleFactor;
+
+  // NEW: radius ∝ √(counts + 1) so area ∝ counts (+1) and min > 0
+  const sizeScale = (c: number) => Math.sqrt(Math.max(0, c) + 1) * 2 * sizeScaleFactor;
 
   const sorted = [...partners].sort((a, b) => b.rawY - a.rawY);
   const placed: { x: number; y: number }[] = [];
@@ -725,7 +814,8 @@ function ScatterPlot({
     })
     .slice(0, 80);
 
-  const mbTicks = Array.from({ length: 9 }, (_, i) => 0.5 + i * 0.5).filter(m => m * 1_000_000 <= genomeLen);
+  const mbTicks = Array.from({ length: 9 }, (_, i) => 0.5 + i * 0.5)
+    .filter(m => m * 1_000_000 <= genomeLen);
 
   return (
     <div className="w-full overflow-x-auto">
@@ -741,7 +831,9 @@ function ScatterPlot({
             return (
               <g key={i} transform={`translate(${xScale(xAbs)},${innerH})`}>
                 <line y2={6} stroke="#222" />
-                <text y={20} textAnchor="middle">{Number.isInteger(m) ? `${m.toFixed(0)} Mb` : `${m} Mb`}</text>
+                <text y={20} textAnchor="middle">
+                  {Number.isInteger(m) ? `${m.toFixed(0)} Mb` : `${m} Mb`}
+                </text>
               </g>
             );
           })}
@@ -755,7 +847,9 @@ function ScatterPlot({
               <line x1={0} x2={innerW} y1={0} y2={0} stroke="#eee" />
             </g>
           ))}
-          <text transform={`translate(${-44},${innerH/2}) rotate(-90)`} className="axis-label">Odds ratio</text>
+          <text transform={`translate(${-44},${innerH/2}) rotate(-90)`} className="axis-label">
+            Odds ratio
+          </text>
 
           {/* focal marker */}
           {focalAnn && (
@@ -800,7 +894,9 @@ function ScatterPlot({
             const disp = formatGeneName(p.partner, partners.find(q => q.partner === p.partner)?.type);
             return (
               <g key={i} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
-                <text x={6} y={-6} style={{ fontStyle: disp.italic ? "italic" : "normal" }}>{disp.text}</text>
+                <text x={6} y={-6} style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
+                  {disp.text}
+                </text>
               </g>
             );
           })}

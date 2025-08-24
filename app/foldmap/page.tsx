@@ -1,10 +1,9 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 
-/* ---------------- Types ---------------- */
 type FeatureType =
   | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
 
@@ -19,7 +18,6 @@ type Annotation = {
 
 type Interaction = { c1: number; c2: number };
 
-/* ---------------- Utils ---------------- */
 function clamp(n: number, a: number, b: number) { return Math.max(a, Math.min(b, n)); }
 function mean(arr: number[]) { return arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0; }
 function std(arr: number[]) { if (!arr.length) return 0; const m = mean(arr); return Math.sqrt(mean(arr.map(v => (v - m) * (v - m)))); }
@@ -118,8 +116,8 @@ async function parseInteractionFiles(files: FileList | null): Promise<Interactio
   return all;
 }
 
-/* ---------------- Matrix builder ---------------- */
-function buildSelfMatrix(
+/* ---------------- Matrix helpers ---------------- */
+function buildSelfMatrixRaw(
   interactions: Interaction[], start: number, end: number, strand: string | undefined, flank: number, bin: number
 ) {
   const ws = Math.max(1, start - flank);
@@ -136,25 +134,33 @@ function buildSelfMatrix(
     const b1 = Math.floor(p1 / bin), b2 = Math.floor(p2 / bin);
     if (b1 >= 0 && b1 < nBins && b2 >= 0 && b2 < nBins) { mat[b1][b2] += 1; if (b1 !== b2) mat[b2][b1] += 1; }
   }
-
-  // simple ICE
-  const ice = mat.map((row) => row.map((v) => v));
-  const n = ice.length;
+  return { ws, we, length, nBins, raw: mat, bin, start, end };
+}
+function iceNormalize(raw: number[][], maxIter = 40) {
+  const n = raw.length;
+  const mat = raw.map(row => row.slice());
   let bias = new Array(n).fill(1);
-  for (let it = 0; it < 120; it++) { // trimmed iterations for speed
-    const adj = new Array(n).fill(0).map(() => new Array(n).fill(0));
-    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) adj[i][j] = bias[i] && bias[j] ? ice[i][j] / (bias[i] * bias[j]) : 0;
-    const rowSums = adj.map((row) => row.reduce((s, v) => s + v, 0));
+  for (let it = 0; it < maxIter; it++) {
+    const rowSums = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      let s = 0;
+      for (let j = 0; j < n; j++) s += bias[i] && bias[j] ? mat[i][j] / (bias[i] * bias[j]) : 0;
+      rowSums[i] = s;
+    }
     const m = mean(rowSums) || 1;
+    let change = 0;
     const newBias = bias.map((b, i) => (rowSums[i] ? b * (rowSums[i] / m) : b));
-    const change = Math.sqrt(mean(newBias.map((v, i) => (v - bias[i]) * (v - bias[i]))));
-    bias = newBias.map((v) => (v ? v / (mean(newBias) || 1) : 1));
-    if (change < 1e-4) break;
+    const avg = mean(newBias) || 1;
+    for (let i = 0; i < n; i++) {
+      const v = newBias[i] ? newBias[i] / avg : 1;
+      change += (v - bias[i]) * (v - bias[i]);
+      bias[i] = v;
+    }
+    if (Math.sqrt(change / n) < 1e-4) break;
   }
-  const iceOut = new Array(n).fill(0).map(() => new Array(n).fill(0));
-  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) iceOut[i][j] = bias[i] && bias[j] ? ice[i][j] / (bias[i] * bias[j]) : 0;
-
-  return { ws, we, length, nBins, raw: mat, ice: iceOut, bin, start, end };
+  const out = new Array(n).fill(0).map(() => new Array(n).fill(0));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) out[i][j] = bias[i] && bias[j] ? mat[i][j] / (bias[i] * bias[j]) : 0;
+  return out;
 }
 function percentile(arr: number[], p: number) {
   const a = arr.slice().sort((x, y) => x - y);
@@ -166,69 +172,68 @@ function percentile(arr: number[], p: number) {
   return a[lo] * (1 - t) + a[hi] * t;
 }
 
-/* ---------------- Very small, instant demo data ---------------- */
-function demoAnn(): Annotation[] {
-  return [
-    { gene_name: "gene8",  start: 20000, end: 21000, strand: "+", feature_type: "CDS" },
-    { gene_name: "gene10", start: 30000, end: 31200, strand: "+", feature_type: "CDS" },
-    { gene_name: "gene12", start: 42000, end: 43200, strand: "-", feature_type: "CDS" },
-    { gene_name: "srna1",  start: 50000, end: 50180, strand: "+", feature_type: "sRNA" },
+/* ---------------- Instant demo ---------------- */
+function demoFoldData() {
+  const ann: Annotation[] = [
+    { gene_name: "gene10", start: 1_000_000, end: 1_001_200, strand: "+", feature_type: "CDS" },
   ];
-}
-function demoInts(a: Annotation[]): Interaction[] {
-  const as = new Map(a.map(x => [x.gene_name, x]));
-  const G = as.get("gene10")!;
-  // generate diagonal-ish self contacts within gene10 with a few domain peaks
-  const rng = ((x:number)=>()=> (x=(x*48271)%0x7fffffff)/0x7fffffff)(7);
   const ints: Interaction[] = [];
-  for (let k = 0; k < 3000; k++) {
-    const i = G.start + Math.floor(rng() * (G.end - G.start));
-    const j = i + Math.floor((rng() - 0.5) * 80);
-    const c1 = Math.max(G.start, Math.min(G.end, i));
-    const c2 = Math.max(G.start, Math.min(G.end, j));
-    ints.push({ c1, c2 });
+  // dense diagonal around gene10 with flank contacts
+  for (let i = 0; i < 900; i++) {
+    const a = 1_000_020 + (i % 600);
+    const b = 1_000_030 + ((i * 7) % 600);
+    ints.push({ c1: a, c2: b });
   }
-  // add some long-range touches
-  for (let k = 0; k < 300; k++) {
-    const i = G.start + Math.floor(rng() * (G.end - G.start));
-    const j = G.start + Math.floor(rng() * (G.end - G.start));
-    ints.push({ c1: i, c2: j });
+  // a couple of domain blocks
+  for (let i = 0; i < 300; i++) {
+    const a = 1_000_100 + (i % 120);
+    const b = 1_000_600 + (i % 120);
+    ints.push({ c1: a, c2: b });
   }
-  return ints;
+  // some long-range hits (>= 5 kb away) to feed profile
+  for (let i = 0; i < 200; i++) {
+    ints.push({ c1: 1_000_050 + (i % 200), c2: 1_010_000 + (i % 500) });
+  }
+  return { ann, ints };
 }
 
-/* ---------------- Page ---------------- */
 export default function FoldMapPage() {
-  // fast demo on boot
-  const [ann, setAnn] = useState<Annotation[]>(() => demoAnn());
-  const [ints, setInts] = useState<Interaction[]>(() => demoInts(demoAnn()));
+  const demo = useMemo(demoFoldData, []);
+  const [ann, setAnn] = useState<Annotation[]>(demo.ann);
+  const [ints, setInts] = useState<Interaction[]>(demo.ints);
 
   const [annFileName, setAnnFileName] = useState<string | null>(null);
   const [chimeraFilesLabel, setChimeraFilesLabel] = useState<string | null>(null);
 
-  // default to a demo gene so the map is instant
   const [inputGene, setInputGene] = useState("gene10");
   const [selectedGene, setSelectedGene] = useState("gene10");
 
-  const [bin, setBin] = useState(10);
+  const [bin, setBin] = useState(20);   // slightly larger bin speeds rendering
   const [flank, setFlank] = useState(200);
-  const [norm, setNorm] = useState<"raw" | "ice">("raw");
+  const [norm, setNorm] = useState<"raw" | "ice">("raw"); // raw first → instant
 
   const [profileWin, setProfileWin] = useState(3);
   const [profileMinDist, setProfileMinDist] = useState(3);
   const [profilePromFactor, setProfilePromFactor] = useState(0.25);
 
-  // Only resolve the gene AFTER submit (or demo default)
   const geneRow = useMemo(() => {
     if (!ann.length || !selectedGene.trim()) return undefined;
     const q = selectedGene.trim().toLowerCase();
     return ann.find((a) => a.gene_name.toLowerCase() === q) || ann.find((a) => a.gene_name.toLowerCase().includes(q));
   }, [ann, selectedGene]);
 
-  const matBundle = useMemo(() => {
+  const matRaw = useMemo(() => {
     if (!geneRow || !ints.length) return undefined;
-    return buildSelfMatrix(ints, geneRow.start, geneRow.end, geneRow.strand, clamp(flank, 0, 500), clamp(bin, 1, 200));
+    return buildSelfMatrixRaw(ints, geneRow.start, geneRow.end, geneRow.strand, clamp(flank, 0, 500), clamp(bin, 1, 200));
   }, [geneRow, ints, flank, bin]);
+
+  const matICE = useMemo(() => {
+    if (!matRaw) return undefined;
+    const ice = iceNormalize(matRaw.raw, 40);
+    return { ...matRaw, ice };
+  }, [matRaw]);
+
+  const matBundle = norm === "ice" ? matICE : matRaw;
 
   const longProfile = useMemo(() => {
     if (!geneRow || !ints.length) return undefined;
@@ -284,7 +289,7 @@ export default function FoldMapPage() {
 
   function exportMatrixSVG() {
     if (!geneRow || !matBundle) return;
-    const mat = norm === "raw" ? matBundle.raw : matBundle.ice;
+    const mat = (matBundle as any).ice ?? (matBundle as any).raw;
     const width = 680, height = 680;
     const pad = 44, x0 = pad, y0 = pad, W = width - pad * 2, H = height - pad * 2;
     const cw = W / matBundle.nBins, ch = H / matBundle.nBins;
@@ -322,13 +327,13 @@ export default function FoldMapPage() {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
       <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>
       <text x="${x0}" y="${y0 - 10}" font-family="ui-sans-serif" font-size="12"${disp.italic ? ' font-style="italic"' : ""}>${disp.text}</text>
-      <text x="${x0 + 180}" y="${y0 - 10}" font-family="ui-sans-serif" font-size="12">— ${norm.toUpperCase()} (bin ${matBundle.bin} nt, flank ${flank} nt)</text>
+      <text x="${x0 + 180}" y="${y0 - 10}" font-family="ui-sans-serif" font-size="12">— ${(matBundle as any).ice ? "ICE" : "RAW"} (bin ${matBundle.bin} nt, flank ${flank} nt)</text>
       ${rects}
       ${overlay}
       <text x="${x0 + W / 2}" y="${height - 10}" text-anchor="middle" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
       <text transform="translate(16,${y0 + H / 2}) rotate(-90)" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
     </svg>`;
-    downloadText(`${disp.text}_foldMAP_${norm}.svg`, svg);
+    downloadText(`${disp.text}_foldMAP_${(matBundle as any).ice ? "ICE" : "RAW"}.svg`, svg);
   }
 
   function exportProfileSVG() {
@@ -382,7 +387,7 @@ export default function FoldMapPage() {
     downloadText(`${disp.text}_longrange_maxima.csv`, rows.map((r) => r.join(",")).join("\n"));
   }
 
-  const dispMat = useMemo(() => (matBundle ? (norm === "raw" ? matBundle.raw : matBundle.ice) : undefined), [matBundle, norm]);
+  const dispMat = useMemo(() => (matBundle ? ((matBundle as any).ice ? (matBundle as any).ice : (matBundle as any).raw) : undefined), [matBundle]);
   const dispGene = geneRow ? formatGeneName(geneRow.gene_name, geneRow.feature_type) : undefined;
 
   return (
@@ -425,7 +430,7 @@ export default function FoldMapPage() {
               </label>
               <input id="ann-file" type="file" accept=".csv" onChange={onAnnFile} className="hidden" />
             </div>
-            <div className="text-[11px] text-gray-500 mt-1">{annFileName || "(demo data loaded)"}</div>
+            <div className="text-[11px] text-gray-500 mt-1">{annFileName || "(demo loaded)"}</div>
 
             <div className="text-xs text-gray-600 mt-3">Chimeras (.bed / .csv)</div>
             <div className="flex items-center gap-2">
@@ -450,7 +455,7 @@ export default function FoldMapPage() {
               </label>
               <input id="chimera-files" type="file" accept=".bed,.csv" multiple onChange={onIntsFile} className="hidden" />
             </div>
-            <div className="text-[11px] text-gray-500 mt-1">{chimeraFilesLabel || "(demo data loaded)"}</div>
+            <div className="text-[11px] text-gray-500 mt-1">{chimeraFilesLabel || "(demo loaded)"}</div>
           </section>
 
           <section className="border rounded-2xl p-4 space-y-3">
@@ -482,7 +487,7 @@ export default function FoldMapPage() {
 
             <div className="text-xs text-gray-700 flex items-center gap-2">
               <span>Normalization:</span>
-              <select className="border rounded px-2 py-1" value={norm} onChange={(e) => setNorm(e.target.value as any)}>
+              <select className="border rounded px-2 py-1" value={norm} onChange={(e) => (setNorm(e.target.value as any))}>
                 <option value="raw">Raw</option>
                 <option value="ice">ICE</option>
               </select>
@@ -528,7 +533,6 @@ export default function FoldMapPage() {
 
         {/* Plots */}
         <div className="col-span-12 lg:col-span-9 space-y-4">
-          {/* Self contact map */}
           <section className="border rounded-2xl p-3">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm text-gray-700">
@@ -581,7 +585,6 @@ export default function FoldMapPage() {
             </div>
           </section>
 
-          {/* Long-range profile */}
           <section className="border rounded-2xl p-3">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm text-gray-700">

@@ -47,7 +47,7 @@ type ScatterRow = {
   counts: number;   // deduped counts
   type: FeatureType;
   distance: number; // genomic midpoints distance
-  fdr?: number;     // min FDR across orientations, if present
+  fdr?: number;     // min FDR, if present
 };
 
 const FEATURE_COLORS: Record<FeatureType, string> = {
@@ -61,9 +61,9 @@ const FEATURE_COLORS: Record<FeatureType, string> = {
   "5'UTR": "#76AAD7",
   "3'UTR": "#0C0C0C",
 };
-const pickColor = (ft?: FeatureType) => FEATURE_COLORS[ft || "CDS"] || "#F78208";
+const colorOf = (ft?: FeatureType) => FEATURE_COLORS[ft || "CDS"] || "#F78208";
 
-// --------- dense, fast simulation ----------
+// --------- denser simulation ----------
 function simulateData(nGenes = 650) {
   const rng = ((seed: number) => () => (seed = (seed * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(42);
   const ann: Annotation[] = [];
@@ -100,20 +100,31 @@ function simulateData(nGenes = 650) {
 
   const pairs: Pair[] = [];
   const genes = ann.map(a => a.gene_name);
+
   function addEdge(a: string, b: string, bias = 1) {
     const c = Math.max(1, Math.floor((rng() ** 0.8) * 200 * bias));
     const or = 0.8 + Math.pow(rng(), 0.35) * 650 * bias;
     const fdr = Math.pow(rng(), 4) * 0.2;
     const aAnn = ann.find(x => x.gene_name === a);
     const bAnn = ann.find(x => x.gene_name === b);
-    pairs.push({ ref: a, target: b, counts: c, odds_ratio: or, fdr, ref_type: aAnn?.feature_type, target_type: bAnn?.feature_type });
+    pairs.push({
+      ref: a,
+      target: b,
+      counts: c,
+      odds_ratio: or,
+      fdr,
+      ref_type: aAnn?.feature_type,
+      target_type: bAnn?.feature_type,
+    });
   }
+
   for (let k = 0; k < nGenes * 5; k++) {
     const a = genes[Math.floor(rng() * genes.length)];
     let b = genes[Math.floor(rng() * genes.length)];
     if (a === b) continue;
     addEdge(a, b, 1);
   }
+
   const sLike = ann.filter(a => a.feature_type === "sRNA" || a.feature_type === "ncRNA").map(a => a.gene_name);
   const pick = (n: number) => Array.from({ length: n }, () => genes[Math.floor(rng() * genes.length)]);
   if (sLike.length > 0) pick(120).forEach(g => addEdge(sLike[Math.floor(rng() * sLike.length)], g, 5));
@@ -130,7 +141,9 @@ function symlog(y: number, linthresh = 10, base = 10) {
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
   const t = type || "CDS";
-  if (t === "sRNA" || t === "ncRNA" || t === "sponge") return { text: cap1(name), italic: false };
+  if (t === "sRNA" || t === "ncRNA" || t === "sponge") {
+    return { text: cap1(name), italic: false };
+  }
   return { text: name, italic: true };
 }
 const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
@@ -140,8 +153,9 @@ const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
   return { label: ft, italic: false };
 };
 
+// ---------- Page ----------
 export default function Page() {
-  const [data, setData] = useState(() => simulateData(650));
+  const [data, setData] = useState(() => simulateData(650)); // demo preloaded
   const [focal, setFocal] = useState<string>("srna1");
   const [minCounts, setMinCounts] = useState(5);
   const [yCap, setYCap] = useState(5000);
@@ -151,19 +165,21 @@ export default function Page() {
   const [query, setQuery] = useState("");
   const [highlightQuery, setHighlightQuery] = useState("");
 
-  // persistent partner "carry list" (across focal changes and reloads)
-  const [carry, setCarry] = useState<string[]>([]);
+  // carryover selections (per focal/data only)
+  const [selectedPartners, setSelectedPartners] = useState<Set<string>>(new Set());
+  const selectedCount = selectedPartners.size;
+  const clearSelection = () => setSelectedPartners(new Set());
+  const toggleSelect = (name: string) =>
+    setSelectedPartners(prev => {
+      const s = new Set(prev);
+      s.has(name) ? s.delete(name) : s.add(name);
+      return s;
+    });
+
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("tricCarry");
-      if (raw) setCarry(JSON.parse(raw));
-    } catch {}
-  }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem("tricCarry", JSON.stringify(carry));
-    } catch {}
-  }, [carry]);
+    // Clear selections whenever focal or loaded data changes
+    setSelectedPartners(new Set());
+  }, [focal, data]);
 
   const filePairsRef = useRef<HTMLInputElement>(null);
   const fileAnnoRef = useRef<HTMLInputElement>(null);
@@ -182,7 +198,8 @@ export default function Page() {
   const allGenes = useMemo(() => annotations.map(a => a.gene_name).sort(), [annotations]);
 
   const highlightSet = useMemo(() => {
-    const toks = highlightQuery.split(/[, \n\t\r]+/).map(t => t.trim()).filter(Boolean);
+    const toks = highlightQuery
+      .split(/[, \n\t\r]+/).map(t => t.trim()).filter(Boolean);
     return new Set(toks);
   }, [highlightQuery]);
 
@@ -238,7 +255,7 @@ export default function Page() {
     return Array.from(acc.values())
       .filter(r => r.counts >= minCounts)
       .filter(r => !excludeTypes.includes(r.type))
-      .sort((a, b) => b.rawY - a.rawY);
+      .sort((a, b) => b.rawY - a.rawY); // stable OR sort
   }, [pairs, focal, geneIndex, minCounts, excludeTypes, yCap]);
 
   const focalChimeraTotal = useMemo(() => {
@@ -319,6 +336,7 @@ export default function Page() {
     const parsed = parsePairsCSV(text);
     setData(prev => ({ ...prev, pairs: parsed }));
     setLoadedPairsName(file.name);
+    clearSelection();
   }
   async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -328,6 +346,7 @@ export default function Page() {
     setData(prev => ({ ...prev, annotations: parsed }));
     setLoadedAnnoName(file.name);
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
+    clearSelection();
   }
 
   async function loadPresetAnno(path: string, label: string) {
@@ -337,6 +356,7 @@ export default function Page() {
     setData(prev => ({ ...prev, annotations: parsed }));
     setLoadedAnnoName(label);
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
+    clearSelection();
   }
 
   async function loadPairsFromURL(url: string) {
@@ -345,6 +365,7 @@ export default function Page() {
     const parsed = parsePairsCSV(text);
     setData(prev => ({ ...prev, pairs: parsed }));
     setLoadedPairsName(new URL(url).pathname.split("/").pop() || "interaction.csv");
+    clearSelection();
   }
 
   const EXCLUDE_GROUPS = [
@@ -388,7 +409,6 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
-  // Export partners table to CSV
   function exportPartnersCSV() {
     const header = ["Partner","Feature","Start","End","io","Of","FDR","Distance"];
     const rows = partners.map(p => [
@@ -411,17 +431,19 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
-  function openCsMap() {
-    const genes = Array.from(new Set([focal, ...carry])).join(",");
-    if (!genes) return;
-    const url = `/csmap?genes=${encodeURIComponent(genes)}&source=global`;
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-  function openPairMap() {
-    if (carry.length === 0) return;
-    const url = `/pairmap?primary=${encodeURIComponent(focal)}&sec=${encodeURIComponent(carry.join(","))}&source=global`;
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
+  // ----- Carryover openers (new tab) -----
+  const openCsMap = () => {
+    if (selectedCount === 0) return;
+    const genes = Array.from(selectedPartners);
+    const url = `/csmap?genes=${encodeURIComponent(genes.join(", "))}`;
+    window.open(url, "_blank");
+  };
+  const openPairMap = () => {
+    if (selectedCount === 0) return;
+    const x = Array.from(selectedPartners);
+    const url = `/pairmap?y=${encodeURIComponent(focal)}&x=${encodeURIComponent(x.join(", "))}`;
+    window.open(url, "_blank");
+  };
 
   return (
     <div>
@@ -451,7 +473,7 @@ export default function Page() {
               <div className="text-xs text-gray-600 mb-1">Highlight genes (comma/space-separated)</div>
               <input
                 className="border rounded px-2 py-1 w-full"
-                placeholder="e.g., gene20, srna3"
+                placeholder="e.g., dnaK, tufA, sRNA_12"
                 value={highlightQuery}
                 onChange={e => setHighlightQuery(e.target.value)}
               />
@@ -501,10 +523,10 @@ export default function Page() {
               className="w-full"
             />
 
-            <label className="text-xs text-gray-600">Circle area scale: ×{sizeScaleFactor.toFixed(1)}</label>
+            <label className="text-xs text-gray-600">Circle size scale: ×{sizeScaleFactor.toFixed(1)}</label>
             <input
               type="range"
-              min={0.5}
+              min={0.1}
               max={2}
               step={0.1}
               value={sizeScaleFactor}
@@ -534,12 +556,6 @@ export default function Page() {
 
           <section className="border rounded-2xl p-4 shadow-sm space-y-2">
             <div className="font-semibold">Data</div>
-            <div className="flex gap-2 flex-wrap">
-              {/* removed “Simulate (dense)” to keep panel clean */}
-              <button className="border rounded px-3 py-1" onClick={downloadSVG}>
-                Export SVG
-              </button>
-            </div>
 
             <div className="text-xs text-gray-600">Interaction analysis CSV</div>
             <div className="mb-2">
@@ -630,13 +646,13 @@ export default function Page() {
             <div className="mt-3 flex flex-wrap gap-4 items-center">
               <span className="text-sm font-medium">Feature types</span>
               {[
-                { key: "CDS", color: pickColor("CDS"), label: "CDS" },
-                { key: "5'UTR", color: pickColor("5'UTR"), label: "5'UTR" },
-                { key: "3'UTR", color: pickColor("3'UTR"), label: "3'UTR" },
-                { key: "sRNA/ncRNA", color: pickColor("sRNA"), label: "sRNA/ncRNA" },
-                { key: "tRNA", color: pickColor("tRNA"), label: "tRNA" },
-                { key: "rRNA/hkRNA", color: pickColor("rRNA"), label: "rRNA/hkRNA" },
-                { key: "sponge", color: pickColor("sponge"), label: "Sponge" },
+                { key: "CDS", color: colorOf("CDS"), label: "CDS" },
+                { key: "5'UTR", color: colorOf("5'UTR"), label: "5'UTR" },
+                { key: "3'UTR", color: colorOf("3'UTR"), label: "3'UTR" },
+                { key: "sRNA/ncRNA", color: colorOf("sRNA"), label: "sRNA/ncRNA" },
+                { key: "tRNA", color: colorOf("tRNA"), label: "tRNA" },
+                { key: "rRNA/hkRNA", color: colorOf("rRNA"), label: "rRNA/hkRNA" },
+                { key: "sponge", color: colorOf("sponge"), label: "Sponge" },
               ].map(item => (
                 <span key={item.key} className="inline-flex items-center gap-2 text-xs">
                   <span
@@ -650,55 +666,16 @@ export default function Page() {
             </div>
           </section>
 
-          {/* Carry box */}
-          <section className="border rounded-2xl p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <div className="font-semibold">Selected partners: {carry.length}</div>
-              <div className="flex gap-2">
-                <button
-                  className="border rounded px-2 py-1 text-xs disabled:opacity-50"
-                  onClick={openCsMap}
-                  disabled={carry.length === 0 && !focal}
-                  title="Opens csMAP in a new tab and pre-fills the genes input"
-                >
-                  Open in csMAP
-                </button>
-                <button
-                  className="border rounded px-2 py-1 text-xs disabled:opacity-50"
-                  onClick={openPairMap}
-                  disabled={carry.length === 0}
-                  title="Opens pairMAP in a new tab with current RNA as primary and selected partners as secondary"
-                >
-                  Open in pairMAP
-                </button>
-                <button
-                  className="border rounded px-2 py-1 text-xs"
-                  onClick={() => setCarry([])}
-                  title="Clear the carry list"
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
-            {carry.length > 0 && (
-              <div className="text-xs text-gray-600">
-                {carry.join(", ")}
-              </div>
-            )}
-          </section>
-
           <section className="border rounded-2xl p-4 shadow-sm">
             <div className="flex justify-between items-center mb-3">
               <div className="font-semibold">
                 Partners for{" "}
-                <button
-                  className="text-blue-600 hover:underline"
+                <span
+                  className="text-blue-600"
                   style={{ fontStyle: formatGeneName(focal, geneIndex[focal]?.feature_type).italic ? "italic" : "normal" }}
-                  onClick={() => setFocal(focal)}
-                  title="Recenter on this RNA"
                 >
                   {formatGeneName(focal, geneIndex[focal]?.feature_type).text}
-                </button>{" "}
+                </span>{" "}
                 {focalAnn && (
                   <span className="text-xs text-gray-500">
                     ({focalAnn.start}–{focalAnn.end})
@@ -706,8 +683,33 @@ export default function Page() {
                 )}{" "}
                 <span className="text-xs text-gray-400">({partners.length} shown)</span>
               </div>
+
               <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-500">
+                <div className="text-xs text-gray-600">Carry selection:</div>
+                <button
+                  className="border rounded px-2 py-1 text-xs disabled:opacity-50"
+                  disabled={selectedCount === 0}
+                  onClick={openCsMap}
+                  title="Open csMAP in a new tab with selected partners as inputs"
+                >
+                  Open csMAP ({selectedCount})
+                </button>
+                <button
+                  className="border rounded px-2 py-1 text-xs disabled:opacity-50"
+                  disabled={selectedCount === 0}
+                  onClick={openPairMap}
+                  title="Open pairMAP in a new tab with current focal as Y and selected partners as X"
+                >
+                  Open pairMAP ({selectedCount})
+                </button>
+                <button
+                  className="border rounded px-2 py-1 text-xs disabled:opacity-50"
+                  disabled={selectedCount === 0}
+                  onClick={clearSelection}
+                >
+                  Clear
+                </button>
+                <div className="text-xs text-gray-500 ml-2">
                   sorted by <em>O</em><sup><em>f</em></sup>
                 </div>
                 <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
@@ -720,7 +722,7 @@ export default function Page() {
               <table className="min-w-full text-sm">
                 <thead className="sticky top-0 bg-white text-left text-gray-600">
                   <tr>
-                    <th className="py-1 pr-4">Carry</th>
+                    <th className="py-1 pr-4">✓</th>
                     <th className="py-1 pr-4">Partner</th>
                     <th className="py-1 pr-4">Feature</th>
                     <th className="py-1 pr-4">Start</th>
@@ -735,38 +737,27 @@ export default function Page() {
                   {partners.map(row => {
                     const dispName = formatGeneName(row.partner, row.type);
                     const typeDisp = combinedLabel(row.type);
-                    const checked = carry.includes(row.partner);
+                    const checked = selectedPartners.has(row.partner);
                     return (
                       <tr
                         key={row.partner}
-                        className="hover:bg-gray-50"
-                        onClick={() => setFocal(row.partner)}
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={() => setFocal(row.partner)} // open centered on partner
                       >
                         <td className="py-1 pr-4" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={checked}
-                            onChange={() => {
-                              setCarry(prev =>
-                                checked ? prev.filter(g => g !== row.partner) : Array.from(new Set([...prev, row.partner]))
-                              );
-                            }}
+                            onChange={() => toggleSelect(row.partner)}
                           />
                         </td>
-                        <td className="py-1 pr-4">
-                          <button
-                            className="text-blue-700 hover:underline"
-                            style={{ fontStyle: dispName.italic ? "italic" : "normal" }}
-                            onClick={(e) => { e.stopPropagation(); setFocal(row.partner); }}
-                            title="Open global map centered on this RNA"
-                          >
-                            {dispName.text}
-                          </button>
+                        <td className="py-1 pr-4 text-blue-700" style={{ fontStyle: dispName.italic ? "italic" : "normal" }}>
+                          {dispName.text}
                         </td>
                         <td className="py-1 pr-4">
                           <span
                             className="inline-block w-3 h-3 rounded-full mr-1"
-                            style={{ background: pickColor(row.type), border: "1px solid #333" }}
+                            style={{ background: colorOf(row.type), border: "1px solid #333" }}
                           />
                           {typeDisp.label}
                         </td>
@@ -835,12 +826,12 @@ function ScatterPlot({
     const tMax = symlog(yCap, 10, 10);
     return innerH - (t / tMax) * innerH;
   };
-  // Circle area ∝ counts (no offset): radius ∝ √counts
-  const sizeScale = (c: number) => Math.sqrt(Math.max(0, c)) * 2 * sizeScaleFactor;
+  const sizeScale = (c: number) => (Math.sqrt(c) * 2 + 4) * sizeScaleFactor;
 
-  const sorted = [...partners].sort((a, b) => b.rawY - a.rawY);
+  // keep separate copies so we NEVER mutate the partners array
+  const sortedForLabels = [...partners].sort((a, b) => b.rawY - a.rawY);
   const placed: { x: number; y: number }[] = [];
-  const labels = sorted
+  const labels = sortedForLabels
     .filter(p => p.rawY >= labelThreshold)
     .filter(p => {
       const px = xScale(p.x);
@@ -907,8 +898,8 @@ function ScatterPlot({
             </g>
           )}
 
-          {/* points */}
-          {partners.sort((a,b) => b.counts - a.counts).map((p, idx) => {
+          {/* points — draw by counts WITHOUT mutating original partners */}
+          {[...partners].sort((a,b) => b.counts - a.counts).map((p, idx) => {
             const highlighted = highlightSet.has(p.partner);
             const face = highlighted ? "#FFEB3B" : "#FFFFFF";
             return (
@@ -916,7 +907,7 @@ function ScatterPlot({
                 <circle
                   r={sizeScale(p.counts)}
                   fill={face}
-                  stroke={pickColor(p.type)}
+                  stroke={colorOf(p.type)}
                   strokeWidth={2}
                   className="cursor-pointer hover:opacity-80"
                   onClick={() => onClickPartner(p.partner)}

@@ -31,7 +31,7 @@ type Pair = {
   target: string;
   counts?: number;
   odds_ratio?: number;
-  fdr?: number; // NEW: optional FDR
+  fdr?: number; // FDR (parsed from p_value_FDR or fdr column)
   totals?: number;
   total_ref?: number;
   ref_type?: FeatureType;
@@ -48,7 +48,7 @@ type ScatterRow = {
   counts: number;   // deduped counts
   type: FeatureType;
   distance: number; // genomic midpoints distance (no longer filtered)
-  fdr?: number;     // NEW: min FDR across orientations, if present
+  fdr?: number;     // min FDR across orientations, if present
 };
 
 const FEATURE_COLORS: Record<FeatureType, string> = {
@@ -226,7 +226,6 @@ export default function Page() {
         prev.y = Math.min(prev.rawY, yCap);
         prev.type = (prev.type || type) as FeatureType;
         prev.distance = Math.min(prev.distance, dist);
-        // keep best (lowest) FDR if present
         if (fdr != null) prev.fdr = prev.fdr != null ? Math.min(prev.fdr, fdr) : fdr;
       } else {
         acc.set(partner, {
@@ -239,14 +238,13 @@ export default function Page() {
           counts,
           type: type as FeatureType,
           distance: dist,
-          fdr: fdr,
+          fdr,
         });
       }
     }
 
     return Array.from(acc.values())
       .filter(r => r.counts >= minCounts)
-      // NOTE: no distance filter anymore
       .filter(r => !excludeTypes.includes(r.type))
       .sort((a, b) => b.rawY - a.rawY);
   }, [pairs, focal, geneIndex, minCounts, excludeTypes, yCap]);
@@ -284,21 +282,30 @@ export default function Page() {
     if (match) setFocal(match);
   }
 
+  // ---- CSV parsing (now reads p_value_FDR if present) ----
   function parsePairsCSV(csv: string) {
-    const { data } = Papa.parse<Pair>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
-    const rows = (data as any[])
-      .filter(r => r.ref && r.target)
-      .map(r => ({
-        ...r,
-        ref: String(r.ref).trim(),
-        target: String(r.target).trim(),
-        // force numeric types if present
-        counts: r.counts != null ? Number(r.counts) : undefined,
-        odds_ratio: r.odds_ratio != null ? Number(r.odds_ratio) : undefined,
-        fdr: r.fdr != null ? Number(r.fdr) : undefined,
-      }));
-    return rows as Pair[];
+    const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
+    const rows: Pair[] = (data as any[])
+      .filter((r) => r.ref && r.target)
+      .map((r) => {
+        // accept common FDR column names; prefer p_value_FDR
+        const rawFdr = r.p_value_FDR ?? r.fdr ?? r.FDR ?? r.fdr_adj ?? r.p_adj;
+        const fdrNum = rawFdr != null && rawFdr !== "" ? Number(rawFdr) : undefined;
+        return {
+          ref: String(r.ref).trim(),
+          target: String(r.target).trim(),
+          counts: r.counts != null ? Number(r.counts) : undefined,
+          odds_ratio: r.odds_ratio != null ? Number(r.odds_ratio) : undefined,
+          fdr: Number.isFinite(fdrNum as number) ? (fdrNum as number) : undefined,
+          totals: r.totals != null ? Number(r.totals) : undefined,
+          total_ref: r.total_ref != null ? Number(r.total_ref) : undefined,
+          ref_type: r.ref_type,
+          target_type: r.target_type,
+        };
+      });
+    return rows;
   }
+
   function parseAnnoCSV(csv: string) {
     const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows: Annotation[] = (data as any[])
@@ -313,6 +320,7 @@ export default function Page() {
       }));
     return rows;
   }
+
   async function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -389,7 +397,7 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
-  // NEW: export partners table to CSV
+  // Export partners table to CSV
   function exportPartnersCSV() {
     const header = ["Partner","Feature","Start","End","io","Of","FDR","Distance"];
     const rows = partners.map(p => [
@@ -454,7 +462,6 @@ export default function Page() {
             <label className="text-xs text-gray-600">
               Min interactions (<span><em>i</em><sub>o</sub></span>): {minCounts}
             </label>
-
             <input
               type="range"
               min={0}
@@ -465,9 +472,9 @@ export default function Page() {
               className="w-full"
             />
 
-            {/* Distance slider removed */}
-
-            <label className="text-xs text-gray-600">Y cap (odds ratio <span><em>O</em><sup>f</sup></span>): {yCap}</label>
+            <label className="text-xs text-gray-600">
+              Y cap (odds ratio <span><em>O</em><sup><em>f</em></sup></span>): {yCap}
+            </label>
             <input
               type="range"
               min={100}
@@ -478,7 +485,9 @@ export default function Page() {
               className="w-full"
             />
 
-            <label className="text-xs text-gray-600">Label threshold (<span><em>O</em><sup>f</sup></span>): {labelThreshold}</label>
+            <label className="text-xs text-gray-600">
+              Label threshold (<span><em>O</em><sup><em>f</em></sup></span>): {labelThreshold}
+            </label>
             <input
               type="range"
               min={0}
@@ -593,7 +602,7 @@ export default function Page() {
 
             <div className="text-[11px] text-gray-600 mt-3 space-y-1">
               <div><span className="font-semibold">Headers —</span></div>
-              <div><span className="font-medium">Interactions CSV:</span> <code>ref, target, counts, odds_ratio, fdr, …</code></div>
+              <div><span className="font-medium">Interactions CSV:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), …</code></div>
               <div><span className="font-medium">Annotations CSV:</span> <code>gene_name, start, end, feature_type, strand, chromosome</code></div>
             </div>
           </section>
@@ -658,7 +667,9 @@ export default function Page() {
                 <span className="text-xs text-gray-400">({partners.length} shown)</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-500">sorted by <em>O</em><sup>f</sup></div>
+                <div className="text-xs text-gray-500">
+                  sorted by <em>O</em><sup><em>f</em></sup>
+                </div>
                 <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
                   Export table CSV
                 </button>
@@ -674,7 +685,7 @@ export default function Page() {
                     <th className="py-1 pr-4">Start</th>
                     <th className="py-1 pr-4">End</th>
                     <th className="py-1 pr-4"><span><em>i</em><sub>o</sub></span></th>
-                    <th className="py-1 pr-4"><span><em>O</em><sup>f</sup></span></th>
+                    <th className="py-1 pr-4"><span><em>O</em><sup><em>f</em></sup></span></th>
                     <th className="py-1 pr-4">FDR</th>
                     <th className="py-1 pr-4">Distance</th>
                   </tr>
@@ -788,7 +799,7 @@ function ScatterPlot({
         <defs>
           <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#1f2937;font-size:10px}.axis-label{font-size:11px}`}</style>
         </defs>
-        <g transform={`translate(${margin.left},${margin.top})`}>          
+        <g transform={`translate(${margin.left},${margin.top})`}>
           {/* X-axis */}
           <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
           {mbTicks.map((m, i) => {

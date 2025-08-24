@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 
@@ -42,11 +42,11 @@ type ScatterRow = {
   x: number;
   start: number;
   end: number;
-  y: number;
-  rawY: number;
-  counts: number;
+  y: number;        // capped OR for plotting
+  rawY: number;     // true odds_ratio
+  counts: number;   // deduped counts
   type: FeatureType;
-  distance: number;
+  distance: number; // genomic midpoints distance
   fdr?: number;
 };
 
@@ -63,7 +63,7 @@ const FEATURE_COLORS: Record<FeatureType, string> = {
 };
 const pickColor = (ft?: FeatureType) => FEATURE_COLORS[ft || "CDS"] || "#F78208";
 
-// --------- denser simulation ----------
+// --------- simulated demo dataset (dense) ----------
 function simulateData(nGenes = 650) {
   const rng = ((seed: number) => () => (seed = (seed * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(42);
   const ann: Annotation[] = [];
@@ -101,7 +101,6 @@ function simulateData(nGenes = 650) {
 
   const pairs: Pair[] = [];
   const genes = ann.map(a => a.gene_name);
-
   function addEdge(a: string, b: string, bias = 1) {
     const c = Math.max(1, Math.floor((rng() ** 0.8) * 200 * bias));
     const or = 0.8 + Math.pow(rng(), 0.35) * 650 * bias;
@@ -118,14 +117,12 @@ function simulateData(nGenes = 650) {
       target_type: bAnn?.feature_type,
     });
   }
-
   for (let k = 0; k < nGenes * 5; k++) {
     const a = genes[Math.floor(rng() * genes.length)];
     let b = genes[Math.floor(rng() * genes.length)];
     if (a === b) continue;
     addEdge(a, b, 1);
   }
-
   const sLike = ann.filter(a => a.feature_type === "sRNA" || a.feature_type === "ncRNA").map(a => a.gene_name);
   const pick = (n: number) => Array.from({ length: n }, () => genes[Math.floor(rng() * genes.length)]);
   if (sLike.length > 0) pick(120).forEach(g => addEdge(sLike[Math.floor(rng() * sLike.length)], g, 5));
@@ -152,9 +149,8 @@ const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
   return { label: ft, italic: false };
 };
 
-// ---------- Page ----------
 export default function Page() {
-  const [data, setData] = useState(() => simulateData(650)); // demo (dense)
+  const [data, setData] = useState(() => simulateData(650)); // demo data by default
   const [focal, setFocal] = useState<string>("srna1");
   const [minCounts, setMinCounts] = useState(5);
   const [yCap, setYCap] = useState(5000);
@@ -169,28 +165,16 @@ export default function Page() {
   const [loadedPairsName, setLoadedPairsName] = useState<string | null>(null);
   const [loadedAnnoName, setLoadedAnnoName] = useState<string | null>(null);
 
-  // --- remember/load last presets across tools (no UI clutter) ---
-  function remember(k: string, v: string) { try { localStorage.setItem(k, v); } catch {} }
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const qs = new URLSearchParams(window.location.search);
-    const pairsQ = qs.get("pairs");
-    const annoQ = qs.get("anno");
-    const focalQ = qs.get("focal");
-    const hiQ = qs.get("highlight");
-    if (pairsQ) loadPairsFromURL(pairsQ);
-    if (annoQ) loadAnnoFromURL(annoQ);
-    if (focalQ) setFocal(focalQ);
-    if (hiQ) setHighlightQuery(hiQ);
-    if (!pairsQ && !annoQ) {
-      const lp = localStorage.getItem("TRIC_pairsURL");
-      const la = localStorage.getItem("TRIC_annoURL");
-      const laLabel = localStorage.getItem("TRIC_annoLabel") || null;
-      if (lp) loadPairsFromURL(lp);
-      if (la) loadAnnoFromURL(la, laLabel || undefined);
-    }
-  }, []);
+  // NEW: selection cart for partner table
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggleSelect = (name: string) => {
+    setSelected(prev => {
+      const s = new Set(prev);
+      if (s.has(name)) s.delete(name); else s.add(name);
+      return s;
+    });
+  };
+  const clearSelection = () => setSelected(new Set());
 
   const annotations = data.annotations;
   const pairs = data.pairs;
@@ -296,7 +280,6 @@ export default function Page() {
     if (match) setFocal(match);
   }
 
-  // ---- CSV parsing ----
   function parsePairsCSV(csv: string) {
     const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows: Pair[] = (data as any[])
@@ -318,7 +301,6 @@ export default function Page() {
       });
     return rows;
   }
-
   function parseAnnoCSV(csv: string) {
     const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows: Annotation[] = (data as any[])
@@ -353,17 +335,12 @@ export default function Page() {
   }
 
   async function loadPresetAnno(path: string, label: string) {
-    await loadAnnoFromURL(path, label);
-  }
-  async function loadAnnoFromURL(url: string, label?: string) {
-    const res = await fetch(url);
+    const res = await fetch(path);
     const text = await res.text();
     const parsed = parseAnnoCSV(text);
     setData(prev => ({ ...prev, annotations: parsed }));
-    setLoadedAnnoName(label || (new URL(url).pathname.split("/").pop() || "annotations.csv"));
+    setLoadedAnnoName(label);
     if (parsed.length > 0) setFocal(parsed[0].gene_name);
-    remember("TRIC_annoURL", url);
-    remember("TRIC_annoLabel", label || "");
   }
 
   async function loadPairsFromURL(url: string) {
@@ -372,7 +349,6 @@ export default function Page() {
     const parsed = parsePairsCSV(text);
     setData(prev => ({ ...prev, pairs: parsed }));
     setLoadedPairsName(new URL(url).pathname.split("/").pop() || "interaction.csv");
-    remember("TRIC_pairsURL", url);
   }
 
   const EXCLUDE_GROUPS = [
@@ -416,7 +392,6 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
-  // Export partners table to CSV
   function exportPartnersCSV() {
     const header = ["Partner","Feature","Start","End","io","Of","FDR","Distance"];
     const rows = partners.map(p => [
@@ -439,6 +414,16 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
+  // build URLs for cross-tool *gene-only* carry (no dataset carry)
+  const buildCsMapURL = () => {
+    const list = [focal, ...Array.from(selected)];
+    return `/csMAP?genes=${encodeURIComponent(list.join(","))}`;
+  };
+  const buildPairMapURL = () => {
+    const list = Array.from(selected);
+    return `/pairMAP?y=${encodeURIComponent(focal)}&x=${encodeURIComponent(list.join(","))}`;
+  };
+
   return (
     <div>
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
@@ -456,7 +441,7 @@ export default function Page() {
             <form onSubmit={handleSearchSubmit} className="flex gap-2 mb-2">
               <input
                 className="border rounded px-2 py-1 w-full"
-                placeholder="Enter RNA (e.g., gene12)"
+                placeholder="Enter RNA (e.g., gene42)"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
               />
@@ -467,7 +452,7 @@ export default function Page() {
               <div className="text-xs text-gray-600 mb-1">Highlight genes (comma/space-separated)</div>
               <input
                 className="border rounded px-2 py-1 w-full"
-                placeholder="e.g., gene1, 5'gene2, srna3"
+                placeholder="e.g., gene10, 5'gene20"
                 value={highlightQuery}
                 onChange={e => setHighlightQuery(e.target.value)}
               />
@@ -531,28 +516,14 @@ export default function Page() {
             <div className="text-xs text-gray-700">
               Exclude types:
               <div className="mt-1 flex flex-wrap gap-1">
-                {[
-                  { label: "tRNA", types: ["tRNA"] as FeatureType[] },
-                  { label: "5'UTR", types: ["5'UTR"] as FeatureType[] },
-                  { label: "3'UTR", types: ["3'UTR"] as FeatureType[] },
-                  { label: "CDS", types: ["CDS"] as FeatureType[] },
-                  { label: "sponge", types: ["sponge"] as FeatureType[] },
-                  { label: "sRNA/ncRNA", types: ["sRNA","ncRNA"] as FeatureType[] },
-                  { label: "hkRNA/rRNA", types: ["hkRNA","rRNA"] as FeatureType[] },
-                ].map(g => {
-                  const active = g.types.every(t => excludeTypes.includes(t));
+                {EXCLUDE_GROUPS.map(g => {
+                  const active = isGroupActive(g.types);
                   return (
                     <button
                       key={g.label}
                       type="button"
                       className={`px-2 py-1 rounded border ${active ? "bg-gray-200" : "bg-white"}`}
-                      onClick={() => {
-                        setExcludeTypes(prev => {
-                          const act = g.types.every(t => prev.includes(t));
-                          if (act) return prev.filter(t => !g.types.includes(t));
-                          const s = new Set(prev); g.types.forEach(t => s.add(t)); return Array.from(s);
-                        });
-                      }}
+                      onClick={() => toggleGroup(g.types)}
                     >
                       {g.label}
                     </button>
@@ -564,8 +535,13 @@ export default function Page() {
 
           <section className="border rounded-2xl p-4 shadow-sm space-y-2">
             <div className="font-semibold">Data</div>
+            <div className="flex gap-2 flex-wrap">
+              {/* Removed Simulate button per request */}
+              <button className="border rounded px-3 py-1" onClick={downloadSVG}>
+                Export SVG
+              </button>
+            </div>
 
-            {/* Interactions */}
             <div className="text-xs text-gray-600">Interaction analysis CSV</div>
             <div className="mb-2">
               <select
@@ -579,20 +555,20 @@ export default function Page() {
                 ))}
               </select>
             </div>
-            <div className="flex gap-2">
+            <div>
               <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
-              <button className="border rounded px-3 py-1" onClick={() => filePairsRef.current?.click()} type="button">
+              <button
+                className="border rounded px-3 py-1 w-full"
+                onClick={() => filePairsRef.current?.click()}
+                type="button"
+              >
                 Choose File
-              </button>
-              <button className="border rounded px-3 py-1" onClick={downloadSVG}>
-                Export SVG
               </button>
             </div>
             <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
 
-            {/* Annotations */}
-            <div className="text-xs text-gray-600 pt-2">Annotations CSV</div>
-            <div className="flex items-center gap-2">
+            <div className="text-xs text-gray-600 pt-2 flex items-center gap-2">
+              <span>Annotations CSV</span>
               <select
                 className="border rounded px-2 py-1 text-xs"
                 onChange={(e) => {
@@ -615,17 +591,21 @@ export default function Page() {
                 <option value="preset-sa">Anno_SA.csv</option>
                 <option value="preset-bs">Anno_BS.csv</option>
               </select>
-              <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
-              <button className="border rounded px-3 py-1" onClick={() => fileAnnoRef.current?.click()} type="button">
-                Choose File
-              </button>
             </div>
+            <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
+            <button
+              className="border rounded px-3 py-1"
+              onClick={() => fileAnnoRef.current?.click()}
+              type="button"
+            >
+              Choose File
+            </button>
             <div className="text-xs text-gray-500">{loadedAnnoName || "(using simulated annotations)"}</div>
 
             <div className="text-[11px] text-gray-600 mt-3 space-y-1">
               <div><span className="font-semibold">Headers —</span></div>
-              <div><span className="font-medium">Interactions:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), …</code></div>
-              <div><span className="font-medium">Annotations:</span> <code>gene_name, start, end, feature_type, strand, chromosome</code></div>
+              <div><span className="font-medium">Interactions CSV:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), …</code></div>
+              <div><span className="font-medium">Annotations CSV:</span> <code>gene_name, start, end, feature_type, strand, chromosome</code></div>
             </div>
           </section>
         </div>
@@ -667,12 +647,13 @@ export default function Page() {
                   {item.label}
                 </span>
               ))}
-              <span className="ml-6 text-xs text-gray-500">Circle area ∝ counts (+1 offset)</span>
+              <span className="ml-6 text-xs text-gray-500">Circle area ∝ counts</span>
             </div>
           </section>
 
-          <section className="border rounded-2xl p-4 shadow-sm">
-            <div className="flex justify-between items-center mb-3">
+          {/* Selection toolbar for cross-tool carry (genes only) */}
+          <section className="border rounded-2xl p-3 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
               <div className="font-semibold">
                 Partners for{" "}
                 <span
@@ -688,68 +669,111 @@ export default function Page() {
                 )}{" "}
                 <span className="text-xs text-gray-400">({partners.length} shown)</span>
               </div>
+
               <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-500">
-                  sorted by <em>O</em><sup><em>f</em></sup>
-                </div>
-                <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
-                  Export table CSV
+                <div className="text-xs text-gray-500">Selected: {selected.size}</div>
+                <button
+                  className="border rounded px-2 py-1 text-xs"
+                  onClick={() => {
+                    const s = new Set(selected);
+                    partners.forEach(p => s.add(p.partner));
+                    setSelected(s);
+                  }}
+                >
+                  Select shown
                 </button>
+                <button className="border rounded px-2 py-1 text-xs" onClick={clearSelection}>
+                  Clear
+                </button>
+                <a
+                  href={buildCsMapURL()}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`border rounded px-2 py-1 text-xs ${selected.size === 0 ? "pointer-events-none opacity-50" : ""}`}
+                  title="Open csMAP with focal + selected partners (new tab)"
+                >
+                  Open csMAP
+                </a>
+                <a
+                  href={buildPairMapURL()}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`border rounded px-2 py-1 text-xs ${selected.size === 0 ? "pointer-events-none opacity-50" : ""}`}
+                  title="Open pairMAP with focal as primary (Y) and selected as secondary (X) (new tab)"
+                >
+                  Open pairMAP
+                </a>
               </div>
             </div>
 
-            <div className="overflow-auto max-h-[500px]">
+            <div className="mt-3 overflow-auto max-h-[520px]">
               <table className="min-w-full text-sm">
                 <thead className="sticky top-0 bg-white text-left text-gray-600">
                   <tr>
-                    <th className="py-1 pr-4">Partner</th>
-                    <th className="py-1 pr-4">Feature</th>
-                    <th className="py-1 pr-4">Start</th>
-                    <th className="py-1 pr-4">End</th>
-                    <th className="py-1 pr-4"><span><em>i</em><sub>o</sub></span></th>
-                    <th className="py-1 pr-4"><span><em>O</em><sup><em>f</em></sup></span></th>
-                    <th className="py-1 pr-4">FDR</th>
-                    <th className="py-1 pr-4">Distance</th>
+                    <th className="py-1 pr-3">Pick</th>
+                    <th className="py-1 pr-3">Partner</th>
+                    <th className="py-1 pr-3">Feature</th>
+                    <th className="py-1 pr-3">Start</th>
+                    <th className="py-1 pr-3">End</th>
+                    <th className="py-1 pr-3"><span><em>i</em><sub>o</sub></span></th>
+                    <th className="py-1 pr-3"><span><em>O</em><sup><em>f</em></sup></span></th>
+                    <th className="py-1 pr-3">FDR</th>
+                    <th className="py-1 pr-3">Distance</th>
                   </tr>
                 </thead>
                 <tbody>
                   {partners.map(row => {
                     const dispName = formatGeneName(row.partner, row.type);
                     const typeDisp = combinedLabel(row.type);
+                    const isSel = selected.has(row.partner);
                     return (
                       <tr
                         key={row.partner}
-                        className="hover:bg-gray-50 cursor-pointer"
+                        className={`hover:bg-gray-50 cursor-pointer ${isSel ? "bg-blue-50" : ""}`}
                         onClick={() => setFocal(row.partner)}
                       >
-                        <td className="py-1 pr-4 text-blue-700" style={{ fontStyle: dispName.italic ? "italic" : "normal" }}>
+                        <td className="py-1 pr-3 align-middle">
+                          <input
+                            type="checkbox"
+                            checked={isSel}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => toggleSelect(row.partner)}
+                          />
+                        </td>
+                        <td className="py-1 pr-3 text-blue-700" style={{ fontStyle: dispName.italic ? "italic" : "normal" }}>
                           {dispName.text}
                         </td>
-                        <td className="py-1 pr-4">
+                        <td className="py-1 pr-3">
                           <span
                             className="inline-block w-3 h-3 rounded-full mr-1"
                             style={{ background: pickColor(row.type), border: "1px solid #333" }}
                           />
                           {typeDisp.label}
                         </td>
-                        <td className="py-1 pr-4">{row.start}</td>
-                        <td className="py-1 pr-4">{row.end}</td>
-                        <td className="py-1 pr-4">{row.counts}</td>
-                        <td className="py-1 pr-4">{row.rawY.toFixed(1)}</td>
-                        <td className="py-1 pr-4">{row.fdr != null ? row.fdr.toExponential(2) : "—"}</td>
-                        <td className="py-1 pr-4">{row.distance}</td>
+                        <td className="py-1 pr-3">{row.start}</td>
+                        <td className="py-1 pr-3">{row.end}</td>
+                        <td className="py-1 pr-3">{row.counts}</td>
+                        <td className="py-1 pr-3">{row.rawY.toFixed(1)}</td>
+                        <td className="py-1 pr-3">{row.fdr != null ? row.fdr.toExponential(2) : "—"}</td>
+                        <td className="py-1 pr-3">{row.distance}</td>
                       </tr>
                     );
                   })}
                   {partners.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="py-2 text-gray-500">
+                      <td colSpan={9} className="py-2 text-gray-500">
                         No partners after filters.
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2 justify-end">
+              <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
+                Export table CSV
+              </button>
             </div>
           </section>
         </div>
@@ -797,9 +821,8 @@ function ScatterPlot({
     const tMax = symlog(yCap, 10, 10);
     return innerH - (t / tMax) * innerH;
   };
-
-  // NEW: radius ∝ √(counts + 1) so area ∝ counts (+1) and min > 0
-  const sizeScale = (c: number) => Math.sqrt(Math.max(0, c) + 1) * 2 * sizeScaleFactor;
+  // IMPORTANT: area ∝ counts -> radius ∝ sqrt(counts); no additive offset
+  const sizeScale = (c: number) => Math.sqrt(Math.max(0, c)) * 3 * sizeScaleFactor;
 
   const sorted = [...partners].sort((a, b) => b.rawY - a.rawY);
   const placed: { x: number; y: number }[] = [];

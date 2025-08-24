@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 
@@ -16,7 +16,6 @@ type Annotation = {
   chromosome?: string;
   feature_type?: FeatureType;
 };
-
 type Interaction = { c1: number; c2: number };
 
 /* ---------------- Utils ---------------- */
@@ -93,7 +92,6 @@ function parseAnnotationCSV(text: string): Annotation[] {
       }));
   }
 }
-
 function parseInteractionText(text: string): Interaction[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (!lines.length) return [];
@@ -109,50 +107,8 @@ function parseInteractionText(text: string): Interaction[] {
 async function parseInteractionFiles(files: FileList | null): Promise<Interaction[]> {
   if (!files || files.length === 0) return [];
   const all: Interaction[] = [];
-  for (const f of Array.from(files)) {
-    const text = await f.text();
-    all.push(...parseInteractionText(text));
-  }
+  for (const f of Array.from(files)) { const text = await f.text(); all.push(...parseInteractionText(text)); }
   return all;
-}
-
-/* ---------------- Demo simulation ---------------- */
-function simulateAnno(n = 200): Annotation[] {
-  const rng = ((s: number) => () => (s = (s * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(123);
-  const genome = 4_300_000;
-  const out: Annotation[] = [];
-  for (let i = 1; i <= n; i++) {
-    const start = Math.floor(rng() * (genome - 1500)) + 1;
-    const len = 300 + Math.floor(rng() * 1200);
-    const end = Math.min(start + len, genome);
-    out.push({ gene_name: `gene${i}`, start, end, strand: rng() > 0.5 ? "+" : "-", feature_type: "CDS" });
-    if (rng() > 0.5) out.push({ gene_name: `5'gene${i}`, start: Math.max(1, start - 150), end: start + 80, feature_type: "5'UTR", strand: "+" });
-    if (rng() > 0.5) out.push({ gene_name: `3'gene${i}`, start: end - 80, end: Math.min(end + 150, genome), feature_type: "3'UTR", strand: "+" });
-  }
-  for (let i = 1; i <= Math.floor(n * 0.1); i++) {
-    const s = Math.floor(rng() * (genome - 350)) + 1;
-    const e = s + 200 + Math.floor(rng() * 150);
-    out.push({ gene_name: `srna${i}`, start: s, end: e, feature_type: "sRNA", strand: "+" });
-  }
-  return out;
-}
-function simulateSelfContacts(ann: Annotation[], gene = "gene1", flank = 200): Interaction[] {
-  const rng = ((s: number) => () => (s = (s * 48271) % 0x7fffffff) / 0x7fffffff)(987);
-  const g = ann.find(a => a.gene_name === gene);
-  if (!g) return [];
-  const ws = Math.max(1, g.start - flank), we = g.end + flank;
-  const out: Interaction[] = [];
-  // dense diagonal-ish self contacts
-  for (let k = 0; k < 4200; k++) {
-    const p = Math.floor(ws + (we - ws) * rng());
-    const q = Math.min(we, Math.max(ws, p + Math.floor((rng() - 0.5) * 60)));
-    out.push({ c1: p, c2: q });
-  }
-  // some noise
-  for (let k = 0; k < 1200; k++) {
-    out.push({ c1: Math.floor(ws + (we - ws) * rng()), c2: Math.floor(ws + (we - ws) * rng()) });
-  }
-  return out;
 }
 
 /* ---------------- Matrix builder ---------------- */
@@ -174,7 +130,7 @@ function buildSelfMatrix(
     if (b1 >= 0 && b1 < nBins && b2 >= 0 && b2 < nBins) { mat[b1][b2] += 1; if (b1 !== b2) mat[b2][b1] += 1; }
   }
 
-  // ICE (simple)
+  // simple ICE-like balancing
   const ice = mat.map((row) => row.map((v) => v));
   const n = ice.length;
   let bias = new Array(n).fill(1);
@@ -193,7 +149,6 @@ function buildSelfMatrix(
 
   return { ws, we, length, nBins, raw: mat, ice: iceOut, bin, start, end };
 }
-
 function percentile(arr: number[], p: number) {
   const a = arr.slice().sort((x, y) => x - y);
   if (!a.length) return 0;
@@ -204,20 +159,53 @@ function percentile(arr: number[], p: number) {
   return a[lo] * (1 - t) + a[hi] * t;
 }
 
-/* ---------------- Page ---------------- */
-export default function FoldMapPage() {
-  // Demo data visible on first load
-  const demoAnn = useMemo(() => simulateAnno(220), []);
-  const demoInts = useMemo(() => simulateSelfContacts(demoAnn, "gene1", 200), [demoAnn]);
+/* ---------------- default simulated dataset ---------------- */
+function simulateAnnotationsForFold(nGenes = 120): Annotation[] {
+  const rng = ((s: number) => () => (s = (s * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(21);
+  const genomeLen = 4_600_000;
+  const out: Annotation[] = [];
+  for (let i = 1; i <= nGenes; i++) {
+    const start = Math.floor(rng() * (genomeLen - 1200)) + 1;
+    const len = 300 + Math.floor(rng() * 900);
+    const end = Math.min(start + len, genomeLen);
+    out.push({ gene_name: `gene${i}`, start, end, strand: rng() > 0.5 ? "+" : "-", feature_type: "CDS", chromosome: "chr" });
+  }
+  return out;
+}
+function simulateInteractionsForFold(ann: Annotation[], N = 16000): Interaction[] {
+  const rng = ((s: number) => () => (s = (s * 1103515245 + 12345) % 0x7fffffff) / 0x7fffffff)(29);
+  const genomeLen = 4_600_000;
+  const rows: Interaction[] = [];
 
-  const [ann, setAnn] = useState<Annotation[]>(demoAnn);
-  const [ints, setInts] = useState<Interaction[]>(demoInts);
+  // background
+  for (let i = 0; i < N; i++) rows.push({ c1: Math.floor(rng() * genomeLen), c2: Math.floor(rng() * genomeLen) });
+
+  const g = ann.find(a => a.gene_name === "gene10");
+  if (g) {
+    const mid = Math.floor((g.start + g.end) / 2);
+    // fold-like islands near the diagonal around gene10
+    for (let i = 0; i < 6000; i++) {
+      const a = mid + Math.floor((rng() - 0.5) * 600);
+      const b = mid + Math.floor((rng() - 0.5) * 600);
+      rows.push({ c1: a, c2: b });
+    }
+  }
+  return rows;
+}
+
+export default function FoldMapPage() {
+  // Simulated data by default
+  const simAnn = useMemo(() => simulateAnnotationsForFold(120), []);
+  const simInts = useMemo(() => simulateInteractionsForFold(simAnn), [simAnn]);
+
+  const [ann, setAnn] = useState<Annotation[]>(simAnn);
+  const [ints, setInts] = useState<Interaction[]>(simInts);
 
   const [annFileName, setAnnFileName] = useState<string | null>(null);
   const [chimeraFilesLabel, setChimeraFilesLabel] = useState<string | null>(null);
 
-  const [inputGene, setInputGene] = useState("gene1");
-  const [selectedGene, setSelectedGene] = useState("gene1");
+  const [inputGene, setInputGene] = useState("gene10");
+  const [selectedGene, setSelectedGene] = useState("gene10");
 
   const [bin, setBin] = useState(10);
   const [flank, setFlank] = useState(200);
@@ -226,25 +214,6 @@ export default function FoldMapPage() {
   const [profileWin, setProfileWin] = useState(3);
   const [profileMinDist, setProfileMinDist] = useState(3);
   const [profilePromFactor, setProfilePromFactor] = useState(0.25);
-
-  // remember/load presets or query
-  function remember(k: string, v: string) { try { localStorage.setItem(k, v); } catch {} }
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const qs = new URLSearchParams(window.location.search);
-    const a = qs.get("anno");
-    const c = qs.get("chim");
-    const g = qs.get("primary") || qs.get("gene");
-    if (a) loadPresetAnno(a);
-    if (c) loadChimerasFromURL(c);
-    if (g) { setInputGene(g); setSelectedGene(g); }
-    if (!a && !c) {
-      const la = localStorage.getItem("TRIC_annoURL");
-      const lc = localStorage.getItem("TRIC_chimURL");
-      if (la) loadPresetAnno(la);
-      if (lc) loadChimerasFromURL(lc);
-    }
-  }, []);
 
   const geneRow = useMemo(() => {
     if (!ann.length || !selectedGene.trim()) return undefined;
@@ -298,7 +267,6 @@ export default function FoldMapPage() {
     setAnn(parseAnnotationCSV(text));
     const base = path.split("/").pop() || path;
     setAnnFileName(base);
-    remember("TRIC_annoURL", path);
   }
   async function loadChimerasFromURL(url: string, label?: string) {
     const res = await fetch(url);
@@ -306,7 +274,6 @@ export default function FoldMapPage() {
     const parsed = parseInteractionText(text);
     setInts(parsed);
     setChimeraFilesLabel(label || (new URL(url).pathname.split("/").pop() ?? "contacts"));
-    remember("TRIC_chimURL", url);
   }
 
   function onSubmitGene(e: React.FormEvent) { e.preventDefault(); setSelectedGene(inputGene); }
@@ -402,7 +369,6 @@ export default function FoldMapPage() {
     </svg>`;
     downloadText(`${disp.text}_longrange_profile.svg`, svg);
   }
-
   function exportPeaksCSV() {
     if (!geneRow || !longProfile) return;
     const disp = formatGeneName(geneRow.gene_name, geneRow.feature_type);
@@ -430,16 +396,23 @@ export default function FoldMapPage() {
                 className="border rounded px-2 py-1 text-xs"
                 defaultValue=""
                 onChange={(e) => {
+                  const map: Record<string, string> = {
+                    "preset-ec": "/Anno_EC.csv",
+                    "preset-ss": "/Anno_SS.csv",
+                    "preset-mx": "/Anno_MX.csv",
+                    "preset-sa": "/Anno_SA.csv",
+                    "preset-bs": "/Anno_BS.csv",
+                  };
                   const v = e.target.value;
-                  if (v) loadPresetAnno(v);
+                  if (map[v]) loadPresetAnno(map[v]);
                 }}
               >
                 <option value="" disabled>Select preset…</option>
-                <option value="/Anno_EC.csv">Anno_EC.csv</option>
-                <option value="/Anno_SS.csv">Anno_SS.csv</option>
-                <option value="/Anno_MX.csv">Anno_MX.csv</option>
-                <option value="/Anno_SA.csv">Anno_SA.csv</option>
-                <option value="/Anno_BS.csv">Anno_BS.csv</option>
+                <option value="preset-ec">Anno_EC.csv</option>
+                <option value="preset-ss">Anno_SS.csv</option>
+                <option value="preset-mx">Anno_MX.csv</option>
+                <option value="preset-sa">Anno_SA.csv</option>
+                <option value="preset-bs">Anno_BS.csv</option>
               </select>
 
               <label htmlFor="ann-file" className="border rounded px-3 py-1 bg-white hover:bg-slate-50 cursor-pointer text-sm">
@@ -456,16 +429,13 @@ export default function FoldMapPage() {
                 defaultValue=""
                 onChange={(e) => {
                   const url = e.target.value;
-                  if (url) {
-                    const item = PRESETS.chimeras.find(p => p.url === url);
-                    loadChimerasFromURL(url, item?.label);
-                  }
+                  if (!url) return;
+                  const item = PRESETS.chimeras.find(p => p.url === url);
+                  loadChimerasFromURL(url, item?.label);
                 }}
               >
                 <option value="" disabled>Select preset…</option>
-                {PRESETS.chimeras.map((p) => (
-                  <option key={p.url} value={p.url}>{p.label}</option>
-                ))}
+                {PRESETS.chimeras.map((p) => (<option key={p.url} value={p.url}>{p.label}</option>))}
               </select>
 
               <label htmlFor="chimera-files" className="border rounded px-3 py-1 bg-white hover:bg-slate-50 cursor-pointer text-sm">
@@ -473,24 +443,19 @@ export default function FoldMapPage() {
               </label>
               <input id="chimera-files" type="file" accept=".bed,.csv" multiple onChange={onIntsFile} className="hidden" />
             </div>
-            <div className="text-[11px] text-gray-500 mt-1">{chimeraFilesLabel || "(using simulated contacts)"}</div>
+            <div className="text-[11px] text-gray-500 mt-1">{chimeraFilesLabel || "(using simulated chimeras)"}</div>
           </section>
 
           <section className="border rounded-2xl p-4 space-y-3">
             <div className="font-semibold">Gene</div>
             <form className="flex gap-2" onSubmit={onSubmitGene}>
-              <input
-                className="border rounded px-2 py-1 w-full"
-                placeholder="Enter RNA (e.g., gene1)"
-                value={inputGene}
-                onChange={(e) => setInputGene(e.target.value)}
-              />
+              <input className="border rounded px-2 py-1 w-full" placeholder="Enter RNA (case-insensitive)" value={inputGene} onChange={(e) => setInputGene(e.target.value)} />
               <button className="border rounded px-3 py-1">Load</button>
             </form>
             <div className="text-xs text-gray-500">
-              {geneRow ? (
-                <>Loaded: <span className="font-medium" style={{ fontStyle: dispGene?.italic ? "italic" : "normal" }}>{dispGene?.text}</span> — {geneRow.start}–{geneRow.end} ({(geneRow.strand || "+").toString()})</>
-              ) : selectedGene ? ( <>No match for “{selectedGene}”.</> ) : ( <>Type a gene and press Load.</> )}
+              {geneRow ? (<>Loaded: <span className="font-medium" style={{ fontStyle: dispGene?.italic ? "italic" : "normal" }}>{dispGene?.text}</span> — {geneRow.start}–{geneRow.end} ({(geneRow.strand || "+").toString()})</>)
+               : selectedGene ? ( <>No match for “{selectedGene}”.</> )
+               : ( <>Type a gene and press Load.</> )}
             </div>
           </section>
 
@@ -528,15 +493,7 @@ export default function FoldMapPage() {
             <input type="range" min={1} max={30} step={1} value={profileMinDist} onChange={(e) => setProfileMinDist(Number(e.target.value))} className="w-full" />
 
             <label className="text-xs text-gray-600">Prominence factor: {profilePromFactor.toFixed(2)} × σ</label>
-            <input
-              type="range"
-              min={5}
-              max={100}
-              step={5}
-              value={Math.round(profilePromFactor * 100)}
-              onChange={(e) => setProfilePromFactor(Number(e.target.value) / 100)}
-              className="w-full"
-            />
+            <input type="range" min={5} max={100} step={5} value={Math.round(profilePromFactor * 100)} onChange={(e) => setProfilePromFactor(Number(e.target.value) / 100)} className="w-full" />
 
             <div className="flex gap-2 pt-2">
               <button className="border rounded px-3 py-1 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportProfileSVG}>
@@ -557,9 +514,7 @@ export default function FoldMapPage() {
               <div className="text-sm text-gray-700">
                 Intramolecular contact map {geneRow ? <>— <span style={{ fontStyle: dispGene?.italic ? "italic" : "normal" }}>{dispGene?.text}</span></> : null}
               </div>
-              {matBundle && (
-                <div className="text-[11px] text-gray-500">bins: {matBundle.nBins} × {matBundle.nBins} (bin {matBundle.bin} nt, flank {flank} nt)</div>
-              )}
+              {matBundle && (<div className="text-[11px] text-gray-500">bins: {matBundle.nBins} × {matBundle.nBins} (bin {matBundle.bin} nt, flank {flank} nt)</div>)}
             </div>
 
             <div className="w-full overflow-auto">

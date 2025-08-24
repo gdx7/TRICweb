@@ -451,7 +451,10 @@ export default function Page() {
           <section className="border rounded-2xl p-4 shadow-sm space-y-3">
             <div className="font-semibold">Filters</div>
 
-            <label className="text-xs text-gray-600">Min <span><em>i</em><sub>o</sub></span>: {minCounts}</label>
+            <label className="text-xs text-gray-600">
+              Min interactions (<span><em>i</em><sub>o</sub></span>): {minCounts}
+            </label>
+
             <input
               type="range"
               min={0}

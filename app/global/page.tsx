@@ -64,76 +64,7 @@ const FEATURE_COLORS: Record<FeatureType, string> = {
 };
 const colorOf = (ft?: FeatureType) => FEATURE_COLORS[ft || "CDS"] || "#F78208";
 
-// --------- denser simulation ----------
-function simulateData(nGenes = 650) {
-  const rng = ((seed: number) => () => (seed = (seed * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(42);
-  const ann: Annotation[] = [];
-  const genomeLen = 4_641_652;
-
-  for (let i = 1; i <= nGenes; i++) {
-    const start = Math.floor(rng() * (genomeLen - 2000)) + 1;
-    const len = Math.max(150, Math.floor(rng() * 1500));
-    const end = Math.min(start + len, genomeLen);
-    ann.push({ gene_name: `gene${i}`, start, end, feature_type: "CDS", strand: rng() > 0.5 ? "+" : "-", chromosome: "chr" });
-
-    if (rng() > 0.35) {
-      const u5s = Math.max(1, start - Math.floor(rng() * 200));
-      const u5e = Math.min(start + Math.floor(len * 0.25), genomeLen);
-      ann.push({ gene_name: `5'gene${i}`, start: u5s, end: u5e, feature_type: "5'UTR", strand: "+", chromosome: "chr" });
-    }
-    if (rng() > 0.35) {
-      const u3s = Math.max(end - Math.floor(len * 0.25), 1);
-      const u3e = Math.min(end + Math.floor(rng() * 200), genomeLen);
-      ann.push({ gene_name: `3'gene${i}`, start: u3s, end: u3e, feature_type: "3'UTR", strand: "+", chromosome: "chr" });
-    }
-  }
-  for (let i = 1; i <= Math.floor(nGenes * 0.11); i++) {
-    const start = Math.floor(rng() * (genomeLen - 400)) + 1;
-    const end = Math.min(start + 200 + Math.floor(rng() * 250), genomeLen);
-    const t = rng() < 0.55 ? "sRNA" : "ncRNA";
-    ann.push({ gene_name: `${t.toLowerCase()}${i}`, start, end, feature_type: t, strand: "+", chromosome: "chr" });
-  }
-  for (let i = 1; i <= Math.floor(nGenes * 0.03); i++) {
-    const start = Math.floor(rng() * (genomeLen - 400)) + 1;
-    const end = Math.min(start + 200 + Math.floor(rng() * 250), genomeLen);
-    ann.push({ gene_name: `sponge${i}`, start, end, feature_type: "sponge", strand: "+", chromosome: "chr" });
-  }
-
-  const pairs: Pair[] = [];
-  const genes = ann.map(a => a.gene_name);
-
-  function addEdge(a: string, b: string, bias = 1) {
-    const c = Math.max(1, Math.floor((rng() ** 0.8) * 200 * bias));
-    const or = 0.8 + Math.pow(rng(), 0.35) * 650 * bias;
-    const fdr = Math.pow(rng(), 4) * 0.2;
-    const aAnn = ann.find(x => x.gene_name === a);
-    const bAnn = ann.find(x => x.gene_name === b);
-    pairs.push({
-      ref: a,
-      target: b,
-      counts: c,
-      odds_ratio: or,
-      fdr,
-      ref_type: aAnn?.feature_type,
-      target_type: bAnn?.feature_type,
-    });
-  }
-
-  for (let k = 0; k < nGenes * 5; k++) {
-    const a = genes[Math.floor(rng() * genes.length)];
-    let b = genes[Math.floor(rng() * genes.length)];
-    if (a === b) continue;
-    addEdge(a, b, 1);
-  }
-
-  const sLike = ann.filter(a => a.feature_type === "sRNA" || a.feature_type === "ncRNA").map(a => a.gene_name);
-  const pick = (n: number) => Array.from({ length: n }, () => genes[Math.floor(rng() * genes.length)]);
-  if (sLike.length > 0) pick(120).forEach(g => addEdge(sLike[Math.floor(rng() * sLike.length)], g, 5));
-
-  return { annotations: ann, pairs };
-}
-
-// -------- helpers ----------
+// --- helpers ---
 function symlog(y: number, linthresh = 10, base = 10) {
   const s = Math.sign(y);
   const a = Math.abs(y);
@@ -142,9 +73,7 @@ function symlog(y: number, linthresh = 10, base = 10) {
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
   const t = type || "CDS";
-  if (t === "sRNA" || t === "ncRNA" || t === "sponge") {
-    return { text: cap1(name), italic: false };
-  }
+  if (t === "sRNA" || t === "ncRNA" || t === "sponge") return { text: cap1(name), italic: false };
   return { text: name, italic: true };
 }
 const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
@@ -153,12 +82,24 @@ const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
   if (ft === "rRNA" || ft === "hkRNA") return { label: "rRNA/hkRNA", italic: false };
   return { label: ft, italic: false };
 };
-const keyForPair = (a: string, b: string) => [a, b].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)).join("||");
+const keyForPair = (a: string, b: string) => [a, b].sort().join("||");
+const baseGene = (name: string) => {
+  // strip 5' / 3' prefixes and anything after a dot
+  const n = name.replace(/^5'|^3'/, "");
+  return n.split(".")[0];
+};
 
 // ---------- Page ----------
 export default function Page() {
-  const [data, setData] = useState(() => simulateData(650)); // demo preloaded
-  const [focal, setFocal] = useState<string>("srna1");
+  // Demo data preloaded (you can upload real CSVs below)
+  const [data, setData] = useState<{ annotations: Annotation[]; pairs: Pair[] }>(() => ({
+    annotations: [],
+    pairs: [],
+  }));
+  // start with empty; user presets or file upload will populate
+  // (keep focal as a string; once annotations load we’ll snap to first)
+  const [focal, setFocal] = useState<string>("");
+
   const [minCounts, setMinCounts] = useState(5);
   const [yCap, setYCap] = useState(5000);
   const [labelThreshold, setLabelThreshold] = useState(50);
@@ -179,7 +120,6 @@ export default function Page() {
     });
 
   useEffect(() => {
-    // Clear selections whenever focal or loaded data changes
     setSelectedPartners(new Set());
   }, [focal, data]);
 
@@ -191,46 +131,43 @@ export default function Page() {
   const annotations = data.annotations;
   const pairs = data.pairs;
 
+  // Snap focal to first annotation when annotations load and focal is empty
+  useEffect(() => {
+    if (!focal && annotations.length > 0) setFocal(annotations[0].gene_name);
+  }, [annotations, focal]);
+
   const geneIndex = useMemo(() => {
     const idx: Record<string, Annotation> = {};
     annotations.forEach(a => (idx[a.gene_name.trim()] = a));
     return idx;
   }, [annotations]);
 
-  const geneByLower = useMemo(() => {
-    const m = new Map<string, string>();
-    annotations.forEach(a => m.set(a.gene_name.trim().toLowerCase(), a.gene_name.trim()));
-    return m;
-  }, [annotations]);
-
   const allGenes = useMemo(() => annotations.map(a => a.gene_name).sort(), [annotations]);
 
   const highlightSet = useMemo(() => {
-    const toks = highlightQuery
-      .split(/[, \n\t\r]+/).map(t => t.trim()).filter(Boolean);
+    const toks = highlightQuery.split(/[, \n\t\r]+/).map(t => t.trim()).filter(Boolean);
     return new Set(toks);
   }, [highlightQuery]);
 
   // ---------- RIL-seq overlay ----------
   const [rilEnabled, setRilEnabled] = useState(false);
   const [rilRaw, setRilRaw] = useState<Array<[string[], string[]]>>([]); // tokenized names
-  const rilPairsCanon: Set<string> = useMemo(() => {
-    // map raw token arrays → canonical (annotation-resolved) pair keys
+  const rilPairsLower: Set<string> = useMemo(() => {
+    // Build a lowercase pair-key set on base gene names
     const set = new Set<string>();
-    const canon = (s: string) => geneByLower.get(s.toLowerCase()) ?? null;
     rilRaw.forEach(([A, B]) => {
       A.forEach(a => {
-        const ca = canon(a);
-        if (!ca) return;
+        const al = baseGene(a).toLowerCase();
+        if (!al) return;
         B.forEach(b => {
-          const cb = canon(b);
-          if (!cb) return;
-          set.add(keyForPair(ca, cb));
+          const bl = baseGene(b).toLowerCase();
+          if (!bl) return;
+          set.add(keyForPair(al, bl));
         });
       });
     });
     return set;
-  }, [rilRaw, geneByLower]);
+  }, [rilRaw]);
 
   useEffect(() => {
     if (!rilEnabled || rilRaw.length) return;
@@ -241,8 +178,7 @@ export default function Page() {
         const parsed = Papa.parse<string[]>(txt, { header: false, dynamicTyping: false, skipEmptyLines: true });
         const norm = (s: string): string[] => {
           const parts = String(s).trim().split(".");
-          // keep tokens that look like gene names (contain any lowercase letter); fall back to first token
-          const genes = parts.filter(p => /[a-z]/.test(p));
+          const genes = parts.filter(p => /[a-z]/.test(p)); // tokens with lowercase letters (likely gene-like)
           return genes.length ? genes : [parts[0]];
         };
         const rows: Array<[string[], string[]]> = (parsed.data as any[])
@@ -250,13 +186,14 @@ export default function Page() {
           .map((r: any) => [norm(r[0]), norm(r[1])]);
         setRilRaw(rows);
       } catch {
-        // ignore fetch errors silently
+        // ignore fetch errors
       }
     })();
   }, [rilEnabled, rilRaw.length]);
 
   // ---------- Build partners ----------
   const partners = useMemo<ScatterRow[]>(() => {
+    if (!focal) return [];
     const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
     const acc = new Map<string, ScatterRow>();
 
@@ -313,7 +250,6 @@ export default function Page() {
 
   // per-gene deduped chimera totals (for Random button)
   const totalsByGene = useMemo(() => {
-    // per gene → map(partner → max counts)
     const per: Map<string, Map<string, number>> = new Map();
     const bump = (g: string, p: string, c: number) => {
       if (g === p) return;
@@ -338,15 +274,18 @@ export default function Page() {
     return tot;
   }, [pairs]);
 
-  const focalChimeraTotal = totalsByGene.get(focal) ?? 0;
+  const focalChimeraTotal = focal ? (totalsByGene.get(focal) ?? 0) : 0;
 
   // genome domain
-  const genomeStart = useMemo(() => Math.min(...annotations.map(a => a.start)), [annotations]);
-  const genomeEnd = useMemo(() => Math.max(...annotations.map(a => a.end)), [annotations]);
+  const genomeStart = useMemo(() => (annotations.length ? Math.min(...annotations.map(a => a.start)) : 0), [annotations]);
+  const genomeEnd = useMemo(() => (annotations.length ? Math.max(...annotations.map(a => a.end)) : 1), [annotations]);
   const genomeLen = Math.max(1, genomeEnd - genomeStart);
 
   const focalAnn = geneIndex[focal];
-  const yTicks = useMemo(() => [0, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter(v => v <= yCap), [yCap]);
+  const yTicks = useMemo(
+    () => [0, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter(v => v <= yCap),
+    [yCap]
+  );
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -380,7 +319,6 @@ export default function Page() {
       });
     return rows;
   }
-
   function parseAnnoCSV(csv: string) {
     const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows: Annotation[] = (data as any[])
@@ -471,7 +409,7 @@ export default function Page() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${focal}_interactome.svg`;
+    a.download = `${focal || "interactome"}_interactome.svg`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -493,7 +431,7 @@ export default function Page() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${focal}_partners.csv`;
+    a.download = `${focal || "interactome"}_partners.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -516,6 +454,7 @@ export default function Page() {
   function pickRandomHigh() {
     const candidates = allGenes.filter(g => (totalsByGene.get(g) ?? 0) >= 200);
     const pool = candidates.length ? candidates : allGenes;
+    if (!pool.length) return;
     const idx = Math.floor(Math.random() * pool.length);
     setFocal(pool[idx]);
   }
@@ -525,7 +464,7 @@ export default function Page() {
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-3">
           <div className="text-xl font-semibold">Global interaction map</div>
-          <div className="text-xs text-gray-500">Demo uses simulated data — upload your CSVs below.</div>
+          <div className="text-xs text-gray-500">Load presets or your CSVs below.</div>
         </div>
       </header>
 
@@ -544,7 +483,18 @@ export default function Page() {
               <button className="border rounded px-3">Go</button>
             </form>
 
-            <div className="mt-3">
+            {/* Random button (moved here) */}
+            <div className="mb-3">
+              <button
+                className="border rounded px-3 py-1"
+                onClick={pickRandomHigh}
+                title="Pick an RNA with ≥200 deduped chimeras"
+              >
+                Random ≥200 chim.
+              </button>
+            </div>
+
+            <div>
               <div className="text-xs text-gray-600 mb-1">Highlight genes (comma/space-separated)</div>
               <input
                 className="border rounded px-2 py-1 w-full"
@@ -646,12 +596,7 @@ export default function Page() {
             <div className="font-semibold">Data</div>
 
             <div className="flex gap-2 flex-wrap">
-              <button className="border rounded px-3 py-1" onClick={() => setData(simulateData(650))}>
-                Simulate (dense)
-              </button>
-              <button className="border rounded px-3 py-1" onClick={pickRandomHigh} title="Pick an RNA with ≥200 deduped chimeras">
-                Random ≥200 chim.
-              </button>
+              {/* Simulate button removed as requested */}
               <button className="border rounded px-3 py-1" onClick={downloadSVG}>
                 Export SVG
               </button>
@@ -680,7 +625,7 @@ export default function Page() {
                 Choose File
               </button>
             </div>
-            <div className="text-xs text-gray-500">{loadedPairsName || "(using simulated pairs)"}</div>
+            <div className="text-xs text-gray-500">{loadedPairsName || "(no interactions loaded yet)"}</div>
 
             <div className="text-xs text-gray-600 pt-2 flex items-center gap-2">
               <span>Annotations CSV</span>
@@ -715,7 +660,7 @@ export default function Page() {
             >
               Choose File
             </button>
-            <div className="text-xs text-gray-500">{loadedAnnoName || "(using simulated annotations)"}</div>
+            <div className="text-xs text-gray-500">{loadedAnnoName || "(no annotations loaded yet)"}</div>
 
             <div className="text-[11px] text-gray-600 mt-3 space-y-1">
               <div><span className="font-semibold">Headers —</span></div>
@@ -741,7 +686,7 @@ export default function Page() {
               highlightSet={highlightSet}
               sizeScaleFactor={sizeScaleFactor}
               rilEnabled={rilEnabled}
-              rilPairsCanon={rilPairsCanon}
+              rilPairsLower={rilPairsLower}
               onClickPartner={(name) => setFocal(name)}
             />
 
@@ -902,7 +847,7 @@ function ScatterPlot({
   highlightSet,
   sizeScaleFactor,
   rilEnabled,
-  rilPairsCanon,
+  rilPairsLower,
   onClickPartner,
 }: {
   focal: string;
@@ -917,12 +862,12 @@ function ScatterPlot({
   highlightSet: Set<string>;
   sizeScaleFactor: number;
   rilEnabled: boolean;
-  rilPairsCanon: Set<string>;
+  rilPairsLower: Set<string>;
   onClickPartner: (gene: string) => void;
 }) {
   const width = 900;
   const height = 520;
-  // Give extra room on the right so labels at the end don't get cut off
+  // Extra room on the right so labels at the end don't get cut off
   const margin = { top: 12, right: 120, bottom: 42, left: 60 };
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
@@ -953,6 +898,8 @@ function ScatterPlot({
   const tickStep = 0.5 * 1_000_000;
   const tickCount = Math.floor(genomeLen / tickStep);
   const mbTicks = Array.from({ length: tickCount }, (_, i) => (i + 1) * 0.5);
+
+  const focalBase = baseGene(focal).toLowerCase();
 
   return (
     <div className="w-full overflow-x-auto">
@@ -1009,9 +956,12 @@ function ScatterPlot({
 
           {/* points — draw by counts WITHOUT mutating original partners */}
           {[...partners].sort((a,b) => b.counts - a.counts).map((p, idx) => {
-            const rilHit = rilEnabled && rilPairsCanon.has(keyForPair(focal, p.partner));
+            // RIL-seq teal fill applies to ALL features of the partner gene (CDS/5'/3')
+            const partnerBase = baseGene(p.partner).toLowerCase();
+            const rilHit = rilEnabled && rilPairsLower.has(keyForPair(focalBase, partnerBase));
+
             const highlighted = highlightSet.has(p.partner);
-            const face = rilHit ? "#2DD4BF" : (highlighted ? "#FFEB3B" : "#FFFFFF"); // teal if RIL pair
+            const face = rilHit ? "#2DD4BF" : (highlighted ? "#FFEB3B" : "#FFFFFF");
             return (
               <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
                 <circle

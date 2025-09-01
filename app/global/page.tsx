@@ -490,7 +490,7 @@ export default function Page() {
                 onClick={pickRandomHigh}
                 title="Pick an RNA with ≥200 deduped chimeras"
               >
-                Random ≥200 chim.
+                Random.
               </button>
             </div>
 

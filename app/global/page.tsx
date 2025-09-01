@@ -1,3 +1,4 @@
+// app/global/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -152,6 +153,7 @@ const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
   if (ft === "rRNA" || ft === "hkRNA") return { label: "rRNA/hkRNA", italic: false };
   return { label: ft, italic: false };
 };
+const keyForPair = (a: string, b: string) => [a, b].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)).join("||");
 
 // ---------- Page ----------
 export default function Page() {
@@ -195,6 +197,12 @@ export default function Page() {
     return idx;
   }, [annotations]);
 
+  const geneByLower = useMemo(() => {
+    const m = new Map<string, string>();
+    annotations.forEach(a => m.set(a.gene_name.trim().toLowerCase(), a.gene_name.trim()));
+    return m;
+  }, [annotations]);
+
   const allGenes = useMemo(() => annotations.map(a => a.gene_name).sort(), [annotations]);
 
   const highlightSet = useMemo(() => {
@@ -203,6 +211,51 @@ export default function Page() {
     return new Set(toks);
   }, [highlightQuery]);
 
+  // ---------- RIL-seq overlay ----------
+  const [rilEnabled, setRilEnabled] = useState(false);
+  const [rilRaw, setRilRaw] = useState<Array<[string[], string[]]>>([]); // tokenized names
+  const rilPairsCanon: Set<string> = useMemo(() => {
+    // map raw token arrays → canonical (annotation-resolved) pair keys
+    const set = new Set<string>();
+    const canon = (s: string) => geneByLower.get(s.toLowerCase()) ?? null;
+    rilRaw.forEach(([A, B]) => {
+      A.forEach(a => {
+        const ca = canon(a);
+        if (!ca) return;
+        B.forEach(b => {
+          const cb = canon(b);
+          if (!cb) return;
+          set.add(keyForPair(ca, cb));
+        });
+      });
+    });
+    return set;
+  }, [rilRaw, geneByLower]);
+
+  useEffect(() => {
+    if (!rilEnabled || rilRaw.length) return;
+    (async () => {
+      try {
+        const res = await fetch("/RIL-seq.csv");
+        const txt = await res.text();
+        const parsed = Papa.parse<string[]>(txt, { header: false, dynamicTyping: false, skipEmptyLines: true });
+        const norm = (s: string): string[] => {
+          const parts = String(s).trim().split(".");
+          // keep tokens that look like gene names (contain any lowercase letter); fall back to first token
+          const genes = parts.filter(p => /[a-z]/.test(p));
+          return genes.length ? genes : [parts[0]];
+        };
+        const rows: Array<[string[], string[]]> = (parsed.data as any[])
+          .filter((r: any) => r && r.length >= 2 && r[0] && r[1])
+          .map((r: any) => [norm(r[0]), norm(r[1])]);
+        setRilRaw(rows);
+      } catch {
+        // ignore fetch errors silently
+      }
+    })();
+  }, [rilEnabled, rilRaw.length]);
+
+  // ---------- Build partners ----------
   const partners = useMemo<ScatterRow[]>(() => {
     const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
     const acc = new Map<string, ScatterRow>();
@@ -255,25 +308,39 @@ export default function Page() {
     return Array.from(acc.values())
       .filter(r => r.counts >= minCounts)
       .filter(r => !excludeTypes.includes(r.type))
-      .sort((a, b) => b.rawY - a.rawY); // stable OR sort
+      .sort((a, b) => b.rawY - a.rawY);
   }, [pairs, focal, geneIndex, minCounts, excludeTypes, yCap]);
 
-  const focalChimeraTotal = useMemo(() => {
-    const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
-    const seen = new Map<string, number>();
-    for (const e of edges) {
-      const ref = String(e.ref || "").trim();
-      const tgt = String(e.target || "").trim();
-      const partner = ref === focal ? tgt : ref;
-      if (!partner || partner === focal) continue;
+  // per-gene deduped chimera totals (for Random button)
+  const totalsByGene = useMemo(() => {
+    // per gene → map(partner → max counts)
+    const per: Map<string, Map<string, number>> = new Map();
+    const bump = (g: string, p: string, c: number) => {
+      if (g === p) return;
+      const m = per.get(g) ?? new Map<string, number>();
+      m.set(p, Math.max(m.get(p) ?? 0, c));
+      per.set(g, m);
+    };
+    for (const e of pairs) {
+      const a = String(e.ref || "").trim();
+      const b = String(e.target || "").trim();
       const c = Number(e.counts) || 0;
-      seen.set(partner, Math.max(seen.get(partner) || 0, c));
+      if (!a || !b) continue;
+      bump(a, b, c);
+      bump(b, a, c);
     }
-    let sum = 0;
-    seen.forEach(v => { sum += v; });
-    return sum;
-  }, [pairs, focal]);
+    const tot = new Map<string, number>();
+    per.forEach((mp, g) => {
+      let s = 0;
+      mp.forEach(v => { s += v; });
+      tot.set(g, s);
+    });
+    return tot;
+  }, [pairs]);
 
+  const focalChimeraTotal = totalsByGene.get(focal) ?? 0;
+
+  // genome domain
   const genomeStart = useMemo(() => Math.min(...annotations.map(a => a.start)), [annotations]);
   const genomeEnd = useMemo(() => Math.max(...annotations.map(a => a.end)), [annotations]);
   const genomeLen = Math.max(1, genomeEnd - genomeStart);
@@ -445,6 +512,14 @@ export default function Page() {
     window.open(url, "_blank");
   };
 
+  // ----- Random button (≥ 200 deduped chimeras) -----
+  function pickRandomHigh() {
+    const candidates = allGenes.filter(g => (totalsByGene.get(g) ?? 0) >= 200);
+    const pool = candidates.length ? candidates : allGenes;
+    const idx = Math.floor(Math.random() * pool.length);
+    setFocal(pool[idx]);
+  }
+
   return (
     <div>
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
@@ -552,10 +627,35 @@ export default function Page() {
                 })}
               </div>
             </div>
+
+            {/* RIL-seq overlay toggle */}
+            <div className="flex items-center gap-2 pt-2">
+              <input
+                id="ril-toggle"
+                type="checkbox"
+                checked={rilEnabled}
+                onChange={(e) => setRilEnabled(e.target.checked)}
+              />
+              <label htmlFor="ril-toggle" className="text-xs text-gray-700">
+                RIL-seq overlay (teal = seen in RIL-seq)
+              </label>
+            </div>
           </section>
 
           <section className="border rounded-2xl p-4 shadow-sm space-y-2">
             <div className="font-semibold">Data</div>
+
+            <div className="flex gap-2 flex-wrap">
+              <button className="border rounded px-3 py-1" onClick={() => setData(simulateData(650))}>
+                Simulate (dense)
+              </button>
+              <button className="border rounded px-3 py-1" onClick={pickRandomHigh} title="Pick an RNA with ≥200 deduped chimeras">
+                Random ≥200 chim.
+              </button>
+              <button className="border rounded px-3 py-1" onClick={downloadSVG}>
+                Export SVG
+              </button>
+            </div>
 
             <div className="text-xs text-gray-600">Interaction analysis CSV</div>
             <div className="mb-2">
@@ -640,6 +740,8 @@ export default function Page() {
               labelThreshold={labelThreshold}
               highlightSet={highlightSet}
               sizeScaleFactor={sizeScaleFactor}
+              rilEnabled={rilEnabled}
+              rilPairsCanon={rilPairsCanon}
               onClickPartner={(name) => setFocal(name)}
             />
 
@@ -799,6 +901,8 @@ function ScatterPlot({
   labelThreshold,
   highlightSet,
   sizeScaleFactor,
+  rilEnabled,
+  rilPairsCanon,
   onClickPartner,
 }: {
   focal: string;
@@ -812,11 +916,14 @@ function ScatterPlot({
   labelThreshold: number;
   highlightSet: Set<string>;
   sizeScaleFactor: number;
+  rilEnabled: boolean;
+  rilPairsCanon: Set<string>;
   onClickPartner: (gene: string) => void;
 }) {
   const width = 900;
   const height = 520;
-  const margin = { top: 12, right: 20, bottom: 42, left: 60 };
+  // Give extra room on the right so labels at the end don't get cut off
+  const margin = { top: 12, right: 120, bottom: 42, left: 60 };
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
 
@@ -828,7 +935,7 @@ function ScatterPlot({
   };
   const sizeScale = (c: number) => (Math.sqrt(c) * 2 + 4) * sizeScaleFactor;
 
-  // keep separate copies so we NEVER mutate the partners array
+  // labels (do NOT mutate partners)
   const sortedForLabels = [...partners].sort((a, b) => b.rawY - a.rawY);
   const placed: { x: number; y: number }[] = [];
   const labels = sortedForLabels
@@ -842,8 +949,10 @@ function ScatterPlot({
     })
     .slice(0, 80);
 
-  const mbTicks = Array.from({ length: 9 }, (_, i) => 0.5 + i * 0.5)
-    .filter(m => m * 1_000_000 <= genomeLen);
+  // Dynamic Mb ticks across the full genome length (every 0.5 Mb)
+  const tickStep = 0.5 * 1_000_000;
+  const tickCount = Math.floor(genomeLen / tickStep);
+  const mbTicks = Array.from({ length: tickCount }, (_, i) => (i + 1) * 0.5);
 
   return (
     <div className="w-full overflow-x-auto">
@@ -900,8 +1009,9 @@ function ScatterPlot({
 
           {/* points — draw by counts WITHOUT mutating original partners */}
           {[...partners].sort((a,b) => b.counts - a.counts).map((p, idx) => {
+            const rilHit = rilEnabled && rilPairsCanon.has(keyForPair(focal, p.partner));
             const highlighted = highlightSet.has(p.partner);
-            const face = highlighted ? "#FFEB3B" : "#FFFFFF";
+            const face = rilHit ? "#2DD4BF" : (highlighted ? "#FFEB3B" : "#FFFFFF"); // teal if RIL pair
             return (
               <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
                 <circle

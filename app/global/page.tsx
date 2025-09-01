@@ -64,7 +64,76 @@ const FEATURE_COLORS: Record<FeatureType, string> = {
 };
 const colorOf = (ft?: FeatureType) => FEATURE_COLORS[ft || "CDS"] || "#F78208";
 
-// --- helpers ---
+// --------- simulation (preloaded) ----------
+function simulateData(nGenes = 650) {
+  const rng = ((seed: number) => () => (seed = (seed * 1664525 + 1013904223) % 0xffffffff) / 0xffffffff)(42);
+  const ann: Annotation[] = [];
+  const genomeLen = 4_641_652;
+
+  for (let i = 1; i <= nGenes; i++) {
+    const start = Math.floor(rng() * (genomeLen - 2000)) + 1;
+    const len = Math.max(150, Math.floor(rng() * 1500));
+    const end = Math.min(start + len, genomeLen);
+    ann.push({ gene_name: `gene${i}`, start, end, feature_type: "CDS", strand: rng() > 0.5 ? "+" : "-", chromosome: "chr" });
+
+    if (rng() > 0.35) {
+      const u5s = Math.max(1, start - Math.floor(rng() * 200));
+      const u5e = Math.min(start + Math.floor(len * 0.25), genomeLen);
+      ann.push({ gene_name: `5'gene${i}`, start: u5s, end: u5e, feature_type: "5'UTR", strand: "+", chromosome: "chr" });
+    }
+    if (rng() > 0.35) {
+      const u3s = Math.max(end - Math.floor(len * 0.25), 1);
+      const u3e = Math.min(end + Math.floor(rng() * 200), genomeLen);
+      ann.push({ gene_name: `3'gene${i}`, start: u3s, end: u3e, feature_type: "3'UTR", strand: "+", chromosome: "chr" });
+    }
+  }
+  for (let i = 1; i <= Math.floor(nGenes * 0.11); i++) {
+    const start = Math.floor(rng() * (genomeLen - 400)) + 1;
+    const end = Math.min(start + 200 + Math.floor(rng() * 250), genomeLen);
+    const t = rng() < 0.55 ? "sRNA" : "ncRNA";
+    ann.push({ gene_name: `${t.toLowerCase()}${i}`, start, end, feature_type: t, strand: "+", chromosome: "chr" });
+  }
+  for (let i = 1; i <= Math.floor(nGenes * 0.03); i++) {
+    const start = Math.floor(rng() * (genomeLen - 400)) + 1;
+    const end = Math.min(start + 200 + Math.floor(rng() * 250), genomeLen);
+    ann.push({ gene_name: `sponge${i}`, start, end, feature_type: "sponge", strand: "+", chromosome: "chr" });
+  }
+
+  const pairs: Pair[] = [];
+  const genes = ann.map(a => a.gene_name);
+
+  function addEdge(a: string, b: string, bias = 1) {
+    const c = Math.max(1, Math.floor((rng() ** 0.8) * 200 * bias));
+    const or = 0.8 + Math.pow(rng(), 0.35) * 650 * bias;
+    const fdr = Math.pow(rng(), 4) * 0.2;
+    const aAnn = ann.find(x => x.gene_name === a);
+    const bAnn = ann.find(x => x.gene_name === b);
+    pairs.push({
+      ref: a,
+      target: b,
+      counts: c,
+      odds_ratio: or,
+      fdr,
+      ref_type: aAnn?.feature_type,
+      target_type: bAnn?.feature_type,
+    });
+  }
+
+  for (let k = 0; k < nGenes * 5; k++) {
+    const a = genes[Math.floor(rng() * genes.length)];
+    let b = genes[Math.floor(rng() * genes.length)];
+    if (a === b) continue;
+    addEdge(a, b, 1);
+  }
+
+  const sLike = ann.filter(a => a.feature_type === "sRNA" || a.feature_type === "ncRNA").map(a => a.gene_name);
+  const pick = (n: number) => Array.from({ length: n }, () => genes[Math.floor(rng() * genes.length)]);
+  if (sLike.length > 0) pick(120).forEach(g => addEdge(sLike[Math.floor(rng() * sLike.length)], g, 5));
+
+  return { annotations: ann, pairs };
+}
+
+// -------- helpers ----------
 function symlog(y: number, linthresh = 10, base = 10) {
   const s = Math.sign(y);
   const a = Math.abs(y);
@@ -84,21 +153,15 @@ const combinedLabel = (ft: FeatureType): { label: string; italic: boolean } => {
 };
 const keyForPair = (a: string, b: string) => [a, b].sort().join("||");
 const baseGene = (name: string) => {
-  // strip 5' / 3' prefixes and anything after a dot
   const n = name.replace(/^5'|^3'/, "");
   return n.split(".")[0];
 };
 
 // ---------- Page ----------
 export default function Page() {
-  // Demo data preloaded (you can upload real CSVs below)
-  const [data, setData] = useState<{ annotations: Annotation[]; pairs: Pair[] }>(() => ({
-    annotations: [],
-    pairs: [],
-  }));
-  // start with empty; user presets or file upload will populate
-  // (keep focal as a string; once annotations load we’ll snap to first)
-  const [focal, setFocal] = useState<string>("");
+  // PRELOADED simulated data (button removed, but data stays)
+  const [data, setData] = useState(() => simulateData(650));
+  const [focal, setFocal] = useState<string>("srna1");
 
   const [minCounts, setMinCounts] = useState(5);
   const [yCap, setYCap] = useState(5000);
@@ -131,11 +194,6 @@ export default function Page() {
   const annotations = data.annotations;
   const pairs = data.pairs;
 
-  // Snap focal to first annotation when annotations load and focal is empty
-  useEffect(() => {
-    if (!focal && annotations.length > 0) setFocal(annotations[0].gene_name);
-  }, [annotations, focal]);
-
   const geneIndex = useMemo(() => {
     const idx: Record<string, Annotation> = {};
     annotations.forEach(a => (idx[a.gene_name.trim()] = a));
@@ -151,9 +209,8 @@ export default function Page() {
 
   // ---------- RIL-seq overlay ----------
   const [rilEnabled, setRilEnabled] = useState(false);
-  const [rilRaw, setRilRaw] = useState<Array<[string[], string[]]>>([]); // tokenized names
+  const [rilRaw, setRilRaw] = useState<Array<[string[], string[]]>>([]);
   const rilPairsLower: Set<string> = useMemo(() => {
-    // Build a lowercase pair-key set on base gene names
     const set = new Set<string>();
     rilRaw.forEach(([A, B]) => {
       A.forEach(a => {
@@ -178,22 +235,19 @@ export default function Page() {
         const parsed = Papa.parse<string[]>(txt, { header: false, dynamicTyping: false, skipEmptyLines: true });
         const norm = (s: string): string[] => {
           const parts = String(s).trim().split(".");
-          const genes = parts.filter(p => /[a-z]/.test(p)); // tokens with lowercase letters (likely gene-like)
+          const genes = parts.filter(p => /[a-z]/.test(p));
           return genes.length ? genes : [parts[0]];
         };
         const rows: Array<[string[], string[]]> = (parsed.data as any[])
           .filter((r: any) => r && r.length >= 2 && r[0] && r[1])
           .map((r: any) => [norm(r[0]), norm(r[1])]);
         setRilRaw(rows);
-      } catch {
-        // ignore fetch errors
-      }
+      } catch {/* ignore */}
     })();
   }, [rilEnabled, rilRaw.length]);
 
   // ---------- Build partners ----------
   const partners = useMemo<ScatterRow[]>(() => {
-    if (!focal) return [];
     const edges = pairs.filter(p => (String(p.ref).trim() === focal || String(p.target).trim() === focal));
     const acc = new Map<string, ScatterRow>();
 
@@ -248,7 +302,7 @@ export default function Page() {
       .sort((a, b) => b.rawY - a.rawY);
   }, [pairs, focal, geneIndex, minCounts, excludeTypes, yCap]);
 
-  // per-gene deduped chimera totals (for Random button)
+  // per-gene deduped chimera totals (for Random)
   const totalsByGene = useMemo(() => {
     const per: Map<string, Map<string, number>> = new Map();
     const bump = (g: string, p: string, c: number) => {
@@ -274,11 +328,11 @@ export default function Page() {
     return tot;
   }, [pairs]);
 
-  const focalChimeraTotal = focal ? (totalsByGene.get(focal) ?? 0) : 0;
+  const focalChimeraTotal = totalsByGene.get(focal) ?? 0;
 
   // genome domain
-  const genomeStart = useMemo(() => (annotations.length ? Math.min(...annotations.map(a => a.start)) : 0), [annotations]);
-  const genomeEnd = useMemo(() => (annotations.length ? Math.max(...annotations.map(a => a.end)) : 1), [annotations]);
+  const genomeStart = useMemo(() => Math.min(...annotations.map(a => a.start)), [annotations]);
+  const genomeEnd = useMemo(() => Math.max(...annotations.map(a => a.end)), [annotations]);
   const genomeLen = Math.max(1, genomeEnd - genomeStart);
 
   const focalAnn = geneIndex[focal];
@@ -450,7 +504,7 @@ export default function Page() {
     window.open(url, "_blank");
   };
 
-  // ----- Random button (≥ 200 deduped chimeras) -----
+  // ----- Random (≥ 200 deduped chimeras) -----
   function pickRandomHigh() {
     const candidates = allGenes.filter(g => (totalsByGene.get(g) ?? 0) >= 200);
     const pool = candidates.length ? candidates : allGenes;
@@ -464,7 +518,7 @@ export default function Page() {
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-3">
           <div className="text-xl font-semibold">Global interaction map</div>
-          <div className="text-xs text-gray-500">Load presets or your CSVs below.</div>
+          <div className="text-xs text-gray-500">Preloaded demo — load presets or your CSVs below.</div>
         </div>
       </header>
 
@@ -483,14 +537,14 @@ export default function Page() {
               <button className="border rounded px-3">Go</button>
             </form>
 
-            {/* Random button (moved here) */}
+            {/* random button just under the search bar */}
             <div className="mb-3">
               <button
                 className="border rounded px-3 py-1"
                 onClick={pickRandomHigh}
                 title="Pick an RNA with ≥200 deduped chimeras"
               >
-                Random.
+                <em>random</em>
               </button>
             </div>
 
@@ -592,79 +646,86 @@ export default function Page() {
             </div>
           </section>
 
-          <section className="border rounded-2xl p-4 shadow-sm space-y-2">
+          <section className="border rounded-2xl p-4 shadow-sm space-y-3">
             <div className="font-semibold">Data</div>
 
             <div className="flex gap-2 flex-wrap">
-              {/* Simulate button removed as requested */}
               <button className="border rounded px-3 py-1" onClick={downloadSVG}>
                 Export SVG
               </button>
             </div>
 
-            <div className="text-xs text-gray-600">Interaction analysis CSV</div>
-            <div className="mb-2">
-              <select
-                className="border rounded px-2 py-1 text-xs w-full"
-                defaultValue=""
-                onChange={(e) => { const u = e.target.value; if (u) loadPairsFromURL(u); }}
-              >
-                <option value="" disabled>Select preset…</option>
-                {PRESETS.interactions.map(p => (
-                  <option key={p.url} value={p.url}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
-              <button
-                className="border rounded px-3 py-1 w-full"
-                onClick={() => filePairsRef.current?.click()}
-                type="button"
-              >
-                Choose File
-              </button>
-            </div>
-            <div className="text-xs text-gray-500">{loadedPairsName || "(no interactions loaded yet)"}</div>
+            {/* Interaction CSV — same inline format as Annotations, with preset on the right */}
+            <label className="text-sm block">
+              <div className="text-slate-700 mb-1 flex items-center justify-between">
+                <span>Interaction CSV</span>
+                <select
+                  className="border rounded px-2 py-1 text-xs"
+                  defaultValue=""
+                  onChange={(e) => { const u = e.target.value; if (u) loadPairsFromURL(u); }}
+                >
+                  <option value="" disabled>Select preset…</option>
+                  {PRESETS.interactions.map(p => (
+                    <option key={p.url} value={p.url}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <input ref={filePairsRef} type="file" accept=".csv" onChange={onPairsFile} className="hidden" />
+                <button
+                  className="border rounded px-3 py-1"
+                  type="button"
+                  onClick={() => filePairsRef.current?.click()}
+                >
+                  Choose File
+                </button>
+              </div>
+              <div className="text-xs text-slate-500 mt-1">{loadedPairsName || "(using simulated pairs)"}</div>
+            </label>
 
-            <div className="text-xs text-gray-600 pt-2 flex items-center gap-2">
-              <span>Annotations CSV</span>
-              <select
-                className="border rounded px-2 py-1 text-xs"
-                onChange={(e) => {
-                  const map: Record<string, string> = {
-                    "preset-ec": "/Anno_EC.csv",
-                    "preset-ss": "/Anno_SS.csv",
-                    "preset-mx": "/Anno_MX.csv",
-                    "preset-sa": "/Anno_SA.csv",
-                    "preset-bs": "/Anno_BS.csv",
-                  };
-                  const v = e.target.value;
-                  if (map[v]) loadPresetAnno(map[v], map[v].slice(1));
-                }}
-                defaultValue=""
-              >
-                <option value="" disabled>Select preset…</option>
-                <option value="preset-ec">Anno_EC.csv</option>
-                <option value="preset-ss">Anno_SS.csv</option>
-                <option value="preset-mx">Anno_MX.csv</option>
-                <option value="preset-sa">Anno_SA.csv</option>
-                <option value="preset-bs">Anno_BS.csv</option>
-              </select>
-            </div>
-            <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
-            <button
-              className="border rounded px-3 py-1"
-              onClick={() => fileAnnoRef.current?.click()}
-              type="button"
-            >
-              Choose File
-            </button>
-            <div className="text-xs text-gray-500">{loadedAnnoName || "(no annotations loaded yet)"}</div>
+            {/* Annotations CSV — same inline format */}
+            <label className="text-sm block">
+              <div className="text-slate-700 mb-1 flex items-center justify-between">
+                <span>Annotations CSV</span>
+                <select
+                  className="border rounded px-2 py-1 text-xs"
+                  defaultValue=""
+                  onChange={(e) => {
+                    const map: Record<string, string> = {
+                      "preset-ec": "/Anno_EC.csv",
+                      "preset-ss": "/Anno_SS.csv",
+                      "preset-mx": "/Anno_MX.csv",
+                      "preset-sa": "/Anno_SA.csv",
+                      "preset-bs": "/Anno_BS.csv",
+                    };
+                    const v = e.target.value;
+                    if (map[v]) loadPresetAnno(map[v], map[v].slice(1));
+                  }}
+                >
+                  <option value="" disabled>Select preset…</option>
+                  <option value="preset-ec">Anno_EC.csv</option>
+                  <option value="preset-ss">Anno_SS.csv</option>
+                  <option value="preset-mx">Anno_MX.csv</option>
+                  <option value="preset-sa">Anno_SA.csv</option>
+                  <option value="preset-bs">Anno_BS.csv</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <input ref={fileAnnoRef} type="file" accept=".csv" onChange={onAnnoFile} className="hidden" />
+                <button
+                  className="border rounded px-3 py-1"
+                  type="button"
+                  onClick={() => fileAnnoRef.current?.click()}
+                >
+                  Choose File
+                </button>
+              </div>
+              <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(using simulated annotations)"}</div>
+            </label>
 
-            <div className="text-[11px] text-gray-600 mt-3 space-y-1">
+            <div className="text-[11px] text-gray-600 mt-2 space-y-1">
               <div><span className="font-semibold">Headers —</span></div>
-              <div><span className="font-medium">Interactions CSV:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), …</code></div>
+              <div><span className="font-medium">Interaction CSV:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), …</code></div>
               <div><span className="font-medium">Annotations CSV:</span> <code>gene_name, start, end, feature_type, strand, chromosome</code></div>
             </div>
           </section>
@@ -723,9 +784,9 @@ export default function Page() {
                 >
                   {formatGeneName(focal, geneIndex[focal]?.feature_type).text}
                 </span>{" "}
-                {focalAnn && (
+                {geneIndex[focal] && (
                   <span className="text-xs text-gray-500">
-                    ({focalAnn.start}–{focalAnn.end})
+                    ({geneIndex[focal].start}–{geneIndex[focal].end})
                   </span>
                 )}{" "}
                 <span className="text-xs text-gray-400">({partners.length} shown)</span>
@@ -789,7 +850,7 @@ export default function Page() {
                       <tr
                         key={row.partner}
                         className="hover:bg-gray-50 cursor-pointer"
-                        onClick={() => setFocal(row.partner)} // open centered on partner
+                        onClick={() => setFocal(row.partner)}
                       >
                         <td className="py-1 pr-4" onClick={(e) => e.stopPropagation()}>
                           <input

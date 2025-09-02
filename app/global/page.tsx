@@ -43,12 +43,12 @@ type ScatterRow = {
   x: number;
   start: number;
   end: number;
-  y: number;        // capped OR for plotting
-  rawY: number;     // true odds_ratio
-  counts: number;   // deduped counts
+  y: number;
+  rawY: number;
+  counts: number;
   type: FeatureType;
-  distance: number; // genomic midpoints distance
-  fdr?: number;     // min FDR, if present
+  distance: number;
+  fdr?: number;
 };
 
 const FEATURE_COLORS: Record<FeatureType, string> = {
@@ -159,7 +159,7 @@ const baseGene = (name: string) => {
 
 // ---------- Page ----------
 export default function Page() {
-  // PRELOADED simulated data (button removed, but data stays)
+  // PRELOADED simulated data (button removed; data stays)
   const [data, setData] = useState(() => simulateData(650));
   const [focal, setFocal] = useState<string>("srna1");
 
@@ -537,17 +537,6 @@ export default function Page() {
               <button className="border rounded px-3">Go</button>
             </form>
 
-            {/* random button just under the search bar */}
-            <div className="mb-3">
-              <button
-                className="border rounded px-3 py-1"
-                onClick={pickRandomHigh}
-                title="Pick an RNA with ≥200 deduped chimeras"
-              >
-                <em>random</em>
-              </button>
-            </div>
-
             <div>
               <div className="text-xs text-gray-600 mb-1">Highlight genes (comma/space-separated)</div>
               <input
@@ -631,31 +620,12 @@ export default function Page() {
                 })}
               </div>
             </div>
-
-            {/* RIL-seq overlay toggle */}
-            <div className="flex items-center gap-2 pt-2">
-              <input
-                id="ril-toggle"
-                type="checkbox"
-                checked={rilEnabled}
-                onChange={(e) => setRilEnabled(e.target.checked)}
-              />
-              <label htmlFor="ril-toggle" className="text-xs text-gray-700">
-                RIL-seq overlay (teal = seen in RIL-seq)
-              </label>
-            </div>
           </section>
 
           <section className="border rounded-2xl p-4 shadow-sm space-y-3">
             <div className="font-semibold">Data</div>
 
-            <div className="flex gap-2 flex-wrap">
-              <button className="border rounded px-3 py-1" onClick={downloadSVG}>
-                Export SVG
-              </button>
-            </div>
-
-            {/* Interaction CSV — same inline format as Annotations, with preset on the right */}
+            {/* Interaction CSV — inline with preset on the right */}
             <label className="text-sm block">
               <div className="text-slate-700 mb-1 flex items-center justify-between">
                 <span>Interaction CSV</span>
@@ -683,7 +653,7 @@ export default function Page() {
               <div className="text-xs text-slate-500 mt-1">{loadedPairsName || "(using simulated pairs)"}</div>
             </label>
 
-            {/* Annotations CSV — same inline format */}
+            {/* Annotations CSV — inline with preset on the right */}
             <label className="text-sm block">
               <div className="text-slate-700 mb-1 flex items-center justify-between">
                 <span>Annotations CSV</span>
@@ -733,7 +703,35 @@ export default function Page() {
 
         {/* Scatter + legend + table */}
         <div className="col-span-12 lg:col-span-9 space-y-4">
-          <section className="border rounded-2xl p-4 shadow-sm">
+          <section className="relative border rounded-2xl p-4 shadow-sm">
+            {/* Floating toolbar over the map (mobile-friendly) */}
+            <div className="absolute right-3 top-3 flex flex-wrap items-center gap-2 bg-white/85 backdrop-blur px-2 py-1 rounded-md border">
+              <button
+                className="border rounded px-2 py-1 text-xs"
+                onClick={pickRandomHigh}
+                title="Pick an RNA with ≥200 deduped chimeras"
+              >
+                <em>random</em>
+              </button>
+
+              <label className="flex items-center gap-2 text-xs px-2 py-1 rounded border bg-white">
+                <input
+                  type="checkbox"
+                  checked={rilEnabled}
+                  onChange={(e) => setRilEnabled(e.target.checked)}
+                />
+                <span>RIL-seq overlay</span>
+              </label>
+
+              <button
+                className="border rounded px-2 py-1 text-xs"
+                onClick={downloadSVG}
+                title="Export current map as SVG"
+              >
+                export (SVG)
+              </button>
+            </div>
+
             <ScatterPlot
               focal={focal}
               focalAnn={geneIndex[focal]}

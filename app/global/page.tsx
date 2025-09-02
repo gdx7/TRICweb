@@ -518,7 +518,7 @@ export default function Page() {
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-3">
           <div className="text-xl font-semibold">Global interaction map</div>
-          <div className="text-xs text-gray-500">Preloaded demo — load presets or your CSVs below.</div>
+          <div className="text-xs text-gray-500">Preloaded demo — load presets or your CSV in the data section.</div>
         </div>
       </header>
 
@@ -545,7 +545,7 @@ export default function Page() {
                 value={highlightQuery}
                 onChange={e => setHighlightQuery(e.target.value)}
               />
-              <div className="text-[11px] text-gray-500 mt-1">Highlighted genes appear with yellow fill if present in the map.</div>
+              <div className="text-[11px] text-gray-500 mt-1">Highlighted genes appear with yellow in the map.</div>
             </div>
           </section>
 
@@ -584,7 +584,7 @@ export default function Page() {
             <input
               type="range"
               min={0}
-              max={500}
+              max={100}
               step={5}
               value={labelThreshold}
               onChange={e => setLabelThreshold(Number(e.target.value))}

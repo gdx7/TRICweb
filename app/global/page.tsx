@@ -159,7 +159,7 @@ const baseGene = (name: string) => {
 
 // ---------- Page ----------
 export default function Page() {
-  // PRELOADED simulated data (button removed; data stays)
+  // PRELOADED simulated data (kept)
   const [data, setData] = useState(() => simulateData(650));
   const [focal, setFocal] = useState<string>("srna1");
 
@@ -171,7 +171,7 @@ export default function Page() {
   const [query, setQuery] = useState("");
   const [highlightQuery, setHighlightQuery] = useState("");
 
-  // carryover selections (per focal/data only)
+  // carryover selections
   const [selectedPartners, setSelectedPartners] = useState<Set<string>>(new Set());
   const selectedCount = selectedPartners.size;
   const clearSelection = () => setSelectedPartners(new Set());
@@ -242,7 +242,7 @@ export default function Page() {
           .filter((r: any) => r && r.length >= 2 && r[0] && r[1])
           .map((r: any) => [norm(r[0]), norm(r[1])]);
         setRilRaw(rows);
-      } catch {/* ignore */}
+      } catch { /* ignore */ }
     })();
   }, [rilEnabled, rilRaw.length]);
 
@@ -490,7 +490,7 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
-  // ----- Carryover openers (new tab) -----
+  // Carryover openers
   const openCsMap = () => {
     if (selectedCount === 0) return;
     const genes = Array.from(selectedPartners);
@@ -504,7 +504,7 @@ export default function Page() {
     window.open(url, "_blank");
   };
 
-  // ----- Random (≥ 200 deduped chimeras) -----
+  // Random (≥ 200 deduped chimeras)
   function pickRandomHigh() {
     const candidates = allGenes.filter(g => (totalsByGene.get(g) ?? 0) >= 200);
     const pool = candidates.length ? candidates : allGenes;
@@ -703,9 +703,26 @@ export default function Page() {
 
         {/* Scatter + legend + table */}
         <div className="col-span-12 lg:col-span-9 space-y-4">
-          <section className="relative border rounded-2xl p-4 shadow-sm">
-            {/* Floating toolbar over the map (mobile-friendly) */}
-            <div className="absolute right-3 top-3 flex flex-wrap items-center gap-2 bg-white/85 backdrop-blur px-2 py-1 rounded-md border">
+          <section className="border rounded-2xl p-4 shadow-sm">
+            <ScatterPlot
+              focal={focal}
+              focalAnn={geneIndex[focal]}
+              focalChimeraTotal={focalChimeraTotal}
+              partners={partners}
+              genomeStart={genomeStart}
+              genomeLen={genomeLen}
+              yCap={yCap}
+              yTicks={yTicks}
+              labelThreshold={labelThreshold}
+              highlightSet={highlightSet}
+              sizeScaleFactor={sizeScaleFactor}
+              rilEnabled={rilEnabled}
+              rilPairsLower={rilPairsLower}
+              onClickPartner={(name) => setFocal(name)}
+            />
+
+            {/* Toolbar BELOW the map, ABOVE the legend */}
+            <div className="mt-2 mb-2 flex flex-wrap items-center gap-2 justify-end">
               <button
                 className="border rounded px-2 py-1 text-xs"
                 onClick={pickRandomHigh}
@@ -731,23 +748,6 @@ export default function Page() {
                 export (SVG)
               </button>
             </div>
-
-            <ScatterPlot
-              focal={focal}
-              focalAnn={geneIndex[focal]}
-              focalChimeraTotal={focalChimeraTotal}
-              partners={partners}
-              genomeStart={genomeStart}
-              genomeLen={genomeLen}
-              yCap={yCap}
-              yTicks={yTicks}
-              labelThreshold={labelThreshold}
-              highlightSet={highlightSet}
-              sizeScaleFactor={sizeScaleFactor}
-              rilEnabled={rilEnabled}
-              rilPairsLower={rilPairsLower}
-              onClickPartner={(name) => setFocal(name)}
-            />
 
             <div className="mt-3 flex flex-wrap gap-4 items-center">
               <span className="text-sm font-medium">Feature types</span>

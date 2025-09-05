@@ -1,6 +1,6 @@
 # TRIC-seq Interactome Explorer
 
-**Live site:** https://www.tricseq.com
+**Live site:** https://www.TRICseq.com
 
 A Next.js (App Router) + Tailwind web app to explore RNA–RNA interactomes. Upload your data or try the simulated demo:
 

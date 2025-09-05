@@ -550,7 +550,7 @@ export default function FoldMapPage() {
             </div>
 
             <div className="flex gap-2 pt-2">
-              <button className="border rounded px-3 py-1 h-8 disabled:opacity-50" disabled={!geneRow || !matBundle} onClick={exportMatrixSVG}>
+              <button className="border rounded px-2 py-1 text-xs h-8 disabled:opacity-50" disabled={!geneRow || !matBundle} onClick={exportMatrixSVG}>
                 Export map SVG
               </button>
             </div>
@@ -577,10 +577,10 @@ export default function FoldMapPage() {
             />
 
             <div className="flex gap-2 pt-2">
-              <button className="border rounded px-2 py-1 h-8 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportProfileSVG}>
+              <button className="border rounded px-2 py-1 text-xs h-8 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportProfileSVG}>
                 Export SVG
               </button>
-              <button className="border rounded px-2 py-1 h-8 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportPeaksCSV}>
+              <button className="border rounded px-2 py-1 text-xs h-8 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportPeaksCSV}>
                 Export CSV
               </button>
             </div>

@@ -523,7 +523,7 @@ export default function FoldMapPage() {
                 value={inputGene}
                 onChange={(e) => setInputGene(e.target.value)}
               />
-              <button className="border rounded px-3 py-1 h-8">Load</button>
+              <button className="border rounded px-2 py-1 text-xs h-8">Load</button>
             </form>
             <div className="text-xs text-gray-500">
               {geneRow ? (

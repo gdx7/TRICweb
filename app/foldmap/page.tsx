@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 
@@ -55,6 +55,49 @@ const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 function formatGeneName(name: string, type?: FeatureType): { text: string; italic: boolean } {
   const t = (type || "CDS") as FeatureType;
   return (t === "sRNA" || t === "ncRNA" || t === "sponge") ? { text: cap1(name), italic: false } : { text: name, italic: true };
+}
+
+/* ---------------- Small reusable UI ---------------- */
+function FilePickerButton({
+  id,
+  label,
+  accept,
+  multiple = false,
+  onFiles,
+}: {
+  id: string;
+  label: string;
+  accept?: string;
+  multiple?: boolean;
+  onFiles: (files: FileList) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button
+        type="button"
+        className="inline-flex h-8 items-center rounded border bg-white px-3 text-sm hover:bg-slate-50"
+        onClick={() => {
+          if (ref.current) {
+            // Allow selecting the same file(s) again
+            ref.current.value = "";
+            ref.current.click();
+          }
+        }}
+      >
+        {label}
+      </button>
+      <input
+        ref={ref}
+        id={id}
+        type="file"
+        accept={accept}
+        multiple={multiple}
+        className="sr-only"
+        onChange={(e) => { if (e.target.files && e.target.files.length) onFiles(e.target.files); }}
+      />
+    </>
+  );
 }
 
 /* ---------------- Parsing ---------------- */
@@ -264,10 +307,10 @@ export default function FoldMapPage() {
     setAnn(parseAnnotationCSV(text));
     setAnnFileName(f.name);
   }
-  async function onIntsFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const arr = await parseInteractionFiles(e.target.files);
+  async function onIntsFileList(files: FileList) {
+    const arr = await parseInteractionFiles(files);
     setInts(arr);
-    const names = e.target.files ? Array.from(e.target.files).map(f => f.name) : [];
+    const names = Array.from(files).map(f => f.name);
     setChimeraFilesLabel(names.length ? names.join(", ") : null);
   }
   async function loadPresetAnno(path: string) {
@@ -403,7 +446,7 @@ export default function FoldMapPage() {
             <div className="text-xs text-gray-600">Annotation CSV</div>
             <div className="flex items-center gap-2">
               <select
-                className="border rounded px-2 py-1 text-xs"
+                className="border h-8 rounded px-2 py-1 text-sm"
                 defaultValue=""
                 onChange={(e) => {
                   const map: Record<string, string> = {
@@ -425,17 +468,26 @@ export default function FoldMapPage() {
                 <option value="preset-bs">Anno_BS.csv</option>
               </select>
 
-              <label htmlFor="ann-file" className="border rounded px-3 py-1 bg-white hover:bg-slate-50 cursor-pointer text-sm">
-                Choose File
-              </label>
-              <input id="ann-file" type="file" accept=".csv" onChange={onAnnFile} className="hidden" />
+              {/* File chooser (annotation) — uses a button + hidden input for robust browser behavior */}
+              <FilePickerButton
+                id="ann-file"
+                label="Choose File"
+                accept=".csv,text/csv,application/vnd.ms-excel"
+                onFiles={async (files) => {
+                  const f = files[0];
+                  if (!f) return;
+                  const text = await f.text();
+                  setAnn(parseAnnotationCSV(text));
+                  setAnnFileName(f.name);
+                }}
+              />
             </div>
             <div className="text-[11px] text-gray-500 mt-1">{annFileName || "(demo loaded)"}</div>
 
             <div className="text-xs text-gray-600 mt-3">Chimeras (.bed / .csv)</div>
             <div className="flex items-center gap-2">
               <select
-                className="border rounded px-2 py-1 text-xs"
+                className="border h-8 rounded px-2 py-1 text-sm"
                 defaultValue=""
                 onChange={(e) => {
                   const url = e.target.value;
@@ -450,10 +502,14 @@ export default function FoldMapPage() {
                 ))}
               </select>
 
-              <label htmlFor="chimera-files" className="border rounded px-3 py-1 bg-white hover:bg-slate-50 cursor-pointer text-sm">
-                Choose Files
-              </label>
-              <input id="chimera-files" type="file" accept=".bed,.csv" multiple onChange={onIntsFile} className="hidden" />
+              {/* File chooser (chimera) — fixed so local files can be selected reliably and matches annotation styling */}
+              <FilePickerButton
+                id="chimera-files"
+                label="Choose Files"
+                accept=".bed,.csv,.tsv,text/tab-separated-values,text/csv,text/plain"
+                multiple
+                onFiles={onIntsFileList}
+              />
             </div>
             <div className="text-[11px] text-gray-500 mt-1">{chimeraFilesLabel || "(demo loaded)"}</div>
           </section>
@@ -467,7 +523,7 @@ export default function FoldMapPage() {
                 value={inputGene}
                 onChange={(e) => setInputGene(e.target.value)}
               />
-              <button className="border rounded px-3 py-1">Load</button>
+              <button className="border rounded px-3 py-1 h-8">Load</button>
             </form>
             <div className="text-xs text-gray-500">
               {geneRow ? (
@@ -487,14 +543,14 @@ export default function FoldMapPage() {
 
             <div className="text-xs text-gray-700 flex items-center gap-2">
               <span>Normalization:</span>
-              <select className="border rounded px-2 py-1" value={norm} onChange={(e) => (setNorm(e.target.value as any))}>
+              <select className="border rounded px-2 py-1 h-8 text-sm" value={norm} onChange={(e) => (setNorm(e.target.value as any))}>
                 <option value="raw">Raw</option>
                 <option value="ice">ICE</option>
               </select>
             </div>
 
             <div className="flex gap-2 pt-2">
-              <button className="border rounded px-3 py-1 disabled:opacity-50" disabled={!geneRow || !matBundle} onClick={exportMatrixSVG}>
+              <button className="border rounded px-3 py-1 h-8 disabled:opacity-50" disabled={!geneRow || !matBundle} onClick={exportMatrixSVG}>
                 Export map SVG
               </button>
             </div>
@@ -521,10 +577,10 @@ export default function FoldMapPage() {
             />
 
             <div className="flex gap-2 pt-2">
-              <button className="border rounded px-3 py-1 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportProfileSVG}>
+              <button className="border rounded px-3 py-1 h-8 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportProfileSVG}>
                 Export profile SVG
               </button>
-              <button className="border rounded px-3 py-1 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportPeaksCSV}>
+              <button className="border rounded px-3 py-1 h-8 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportPeaksCSV}>
                 Export maxima CSV
               </button>
             </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 
@@ -57,49 +57,6 @@ function formatGeneName(name: string, type?: FeatureType): { text: string; itali
   return (t === "sRNA" || t === "ncRNA" || t === "sponge") ? { text: cap1(name), italic: false } : { text: name, italic: true };
 }
 
-/* ---------------- Small reusable UI ---------------- */
-function FilePickerButton({
-  id,
-  label,
-  accept,
-  multiple = false,
-  onFiles,
-}: {
-  id: string;
-  label: string;
-  accept?: string;
-  multiple?: boolean;
-  onFiles: (files: FileList) => void;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  return (
-    <>
-      <button
-        type="button"
-        className="inline-flex h-8 items-center rounded border bg-white px-2 text-xs hover:bg-slate-50 shrink-0"
-        onClick={() => {
-          if (ref.current) {
-            // Allow selecting the same file(s) again
-            ref.current.value = "";
-            ref.current.click();
-          }
-        }}
-      >
-        {label}
-      </button>
-      <input
-        ref={ref}
-        id={id}
-        type="file"
-        accept={accept}
-        multiple={multiple}
-        className="hidden"
-        onChange={(e) => { if (e.target.files && e.target.files.length) onFiles(e.target.files); }}
-      />
-    </>
-  );
-}
-
 /* ---------------- Parsing ---------------- */
 function parseAnnotationCSV(text: string): Annotation[] {
   const { data } = Papa.parse<any>(text, { header: false, dynamicTyping: true, skipEmptyLines: true });
@@ -149,15 +106,6 @@ function parseInteractionText(text: string): Interaction[] {
   }
   return out;
 }
-async function parseInteractionFiles(files: FileList | null): Promise<Interaction[]> {
-  if (!files || files.length === 0) return [];
-  const all: Interaction[] = [];
-  for (const f of Array.from(files)) {
-    const text = await f.text();
-    all.push(...parseInteractionText(text));
-  }
-  return all;
-}
 
 /* ---------------- Matrix helpers ---------------- */
 function buildSelfMatrixRaw(
@@ -202,7 +150,7 @@ function iceNormalize(raw: number[][], maxIter = 40) {
     if (Math.sqrt(change / n) < 1e-4) break;
   }
   const out = new Array(n).fill(0).map(() => new Array(n).fill(0));
-  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) out[i][j] = bias[i] && bias[j] ? mat[i][j] / (bias[i] * bias[j]) : 0;
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) out[i][j] = bias[i] && bias[j] ? mat[i][j] / (bias[i] * (bias[j] || 1)) : 0;
   return out;
 }
 function percentile(arr: number[], p: number) {
@@ -221,19 +169,16 @@ function demoFoldData() {
     { gene_name: "gene10", start: 1_000_000, end: 1_001_200, strand: "+", feature_type: "CDS" },
   ];
   const ints: Interaction[] = [];
-  // dense diagonal around gene10 with flank contacts
   for (let i = 0; i < 900; i++) {
     const a = 1_000_020 + (i % 600);
     const b = 1_000_030 + ((i * 7) % 600);
     ints.push({ c1: a, c2: b });
   }
-  // a couple of domain blocks
   for (let i = 0; i < 300; i++) {
     const a = 1_000_100 + (i % 120);
     const b = 1_000_600 + (i % 120);
     ints.push({ c1: a, c2: b });
   }
-  // some long-range hits (>= 5 kb away) to feed profile
   for (let i = 0; i < 200; i++) {
     ints.push({ c1: 1_000_050 + (i % 200), c2: 1_010_000 + (i % 500) });
   }
@@ -251,9 +196,9 @@ export default function FoldMapPage() {
   const [inputGene, setInputGene] = useState("gene10");
   const [selectedGene, setSelectedGene] = useState("gene10");
 
-  const [bin, setBin] = useState(20);   // slightly larger bin speeds rendering
+  const [bin, setBin] = useState(20);
   const [flank, setFlank] = useState(200);
-  const [norm, setNorm] = useState<"raw" | "ice">("raw"); // raw first → instant
+  const [norm, setNorm] = useState<"raw" | "ice">("raw");
 
   const [profileWin, setProfileWin] = useState(3);
   const [profileMinDist, setProfileMinDist] = useState(3);
@@ -301,17 +246,18 @@ export default function FoldMapPage() {
     return { ws, we, prof, smooth: sm, peaks };
   }, [geneRow, ints, flank, profileWin, profileMinDist, profilePromFactor]);
 
-  async function onAnnFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onAnnFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
     const text = await f.text();
     setAnn(parseAnnotationCSV(text));
     setAnnFileName(f.name);
   }
-  async function onIntsFileList(files: FileList) {
-    const arr = await parseInteractionFiles(files);
-    setInts(arr);
-    const names = Array.from(files).map(f => f.name);
-    setChimeraFilesLabel(names.length ? names.join(", ") : null);
+  async function onChimeraFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    const text = await f.text();
+    const parsed = parseInteractionText(text);
+    setInts(parsed);
+    setChimeraFilesLabel(f.name);
   }
   async function loadPresetAnno(path: string) {
     const res = await fetch(path);
@@ -443,10 +389,12 @@ export default function FoldMapPage() {
           <section className="border rounded-2xl p-4">
             <div className="font-semibold mb-2">Data</div>
 
+            {/* Annotation row */}
             <div className="text-xs text-gray-600">Annotation CSV</div>
-            <div className=\"flex items-center gap-2 w-full\">
+            <div className="grid grid-cols-[220px_140px] gap-2 items-center">
               <select
-                className=\"border h-8 rounded px-2 text-sm w-4/5\"
+                aria-label="Annotation preset"
+                className="border h-8 rounded px-2 text-sm w-[220px]"
                 defaultValue=""
                 onChange={(e) => {
                   const map: Record<string, string> = {
@@ -468,26 +416,23 @@ export default function FoldMapPage() {
                 <option value="preset-bs">Anno_BS.csv</option>
               </select>
 
-              {/* File chooser (annotation) — uses a button + hidden input for robust browser behavior */}
-              <FilePickerButton
-                id="ann-file"
-                label=\"Choose\"
+              {/* Visible, styled native file input for maximum compatibility */}
+              <input
+                aria-label="Choose annotation file"
+                type="file"
                 accept=".csv,text/csv,application/vnd.ms-excel"
-                onFiles={async (files) => {
-                  const f = files[0];
-                  if (!f) return;
-                  const text = await f.text();
-                  setAnn(parseAnnotationCSV(text));
-                  setAnnFileName(f.name);
-                }}
+                onChange={onAnnFileInput}
+                className="block h-8 w-[140px] text-sm file:h-8 file:px-3 file:py-0 file:rounded file:border file:bg-white hover:file:bg-slate-50 file:cursor-pointer"
               />
             </div>
             <div className="text-[11px] text-gray-500 mt-1">{annFileName || "(demo loaded)"}</div>
 
+            {/* Chimera row */}
             <div className="text-xs text-gray-600 mt-3">Chimeras (.bed / .csv)</div>
-            <div className=\"flex items-center gap-2 w-full\">
+            <div className="grid grid-cols-[220px_140px] gap-2 items-center">
               <select
-                className=\"border h-8 rounded px-2 text-sm w-4/5\"
+                aria-label="Chimera preset"
+                className="border h-8 rounded px-2 text-sm w-[220px]"
                 defaultValue=""
                 onChange={(e) => {
                   const url = e.target.value;
@@ -502,13 +447,13 @@ export default function FoldMapPage() {
                 ))}
               </select>
 
-              {/* File chooser (chimera) — fixed so local files can be selected reliably and matches annotation styling */}
-              <FilePickerButton
-                id="chimera-files"
-                label=\"Choose\"
+              {/* Match annotation input styling; use FIRST file (like PairMAP) for reliability */}
+              <input
+                aria-label="Choose chimera file"
+                type="file"
                 accept=".bed,.csv,.tsv,text/tab-separated-values,text/csv,text/plain"
-                multiple
-                onFiles={onIntsFileList}
+                onChange={onChimeraFileInput}
+                className="block h-8 w-[140px] text-sm file:h-8 file:px-3 file:py-0 file:rounded file:border file:bg-white hover:file:bg-slate-50 file:cursor-pointer"
               />
             </div>
             <div className="text-[11px] text-gray-500 mt-1">{chimeraFilesLabel || "(demo loaded)"}</div>

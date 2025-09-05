@@ -10,7 +10,7 @@ export const PRESETS = {
 
   // Shown in pairMAP + foldMAP “Chimeras (.bed/.csv)” dropdown
   chimeras: [
-    { label: "Chimeras — EC (long-range)", url: "https://6xaweu7axahancgd.public.blob.vercel-storage.com/LR_chimera_EC.bed" },
-    { label: "Chimeras — SA (long-range)", url: "https://6xaweu7axahancgd.public.blob.vercel-storage.com/LR_chimera_SA.bed" },
+    { label: "Chimeras — EC", url: "https://6xaweu7axahancgd.public.blob.vercel-storage.com/LR_chimera_EC.bed" },
+    { label: "Chimeras — SA", url: "https://6xaweu7axahancgd.public.blob.vercel-storage.com/LR_chimera_SA.bed" },
   ],
 };

@@ -807,7 +807,7 @@ export default function Page() {
           <section className="border rounded-2xl p-4 shadow-sm">
             <div className="flex justify-between items-center mb-3">
               <div className="font-semibold">
-                Partners for{" "}
+                {" "}
                 {(() => {
                   const disp = formatGeneName(focal, geneIndex[focal]?.feature_type);
                   return focalLink ? (
@@ -839,7 +839,7 @@ export default function Page() {
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-600">Carry selection:</div>
+                <div className="text-xs text-gray-600">Selection:</div>
                 <button
                   className="border rounded px-2 py-1 text-xs disabled:opacity-50"
                   disabled={selectedCount === 0}

@@ -513,6 +513,38 @@ export default function Page() {
     setFocal(pool[idx]);
   }
 
+  // --------- DB link helpers (based on selected annotation preset) ---------
+  const speciesKey = useMemo<"EC" | "SS" | "SA" | "BS" | "MX" | undefined>(() => {
+    const name = (loadedAnnoName || "").toLowerCase();
+    if (name.includes("anno_ec")) return "EC";
+    if (name.includes("anno_ss")) return "SS";
+    if (name.includes("anno_sa")) return "SA";
+    if (name.includes("anno_bs")) return "BS";
+    if (name.includes("anno_mx")) return "MX";
+    return undefined;
+  }, [loadedAnnoName]);
+
+  const dbLinkForGene = (gene: string): string | null => {
+    if (!speciesKey) return null;
+    const g = baseGene(gene);
+    switch (speciesKey) {
+      case "EC":
+        return `https://biocyc.org/ECOLI/substring-search?type=NIL&object=${encodeURIComponent(g)}`;
+      case "SS":
+        return `https://biocyc.org/gene?orgid=GCF_000279165&id=${encodeURIComponent(g)}`;
+      case "SA":
+        return `https://aureowiki.med.uni-greifswald.de/${encodeURIComponent(g)}`;
+      case "BS":
+        return `https://subtiwiki.uni-goettingen.de/v5/gene/${encodeURIComponent(g)}`;
+      case "MX":
+        return `https://biocyc.org/gene?orgid=GCF_000012685&id=${encodeURIComponent(g)}`;
+      default:
+        return null;
+    }
+  };
+
+  const focalLink = dbLinkForGene(focal);
+
   return (
     <div>
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
@@ -776,12 +808,28 @@ export default function Page() {
             <div className="flex justify-between items-center mb-3">
               <div className="font-semibold">
                 Partners for{" "}
-                <span
-                  className="text-blue-600"
-                  style={{ fontStyle: formatGeneName(focal, geneIndex[focal]?.feature_type).italic ? "italic" : "normal" }}
-                >
-                  {formatGeneName(focal, geneIndex[focal]?.feature_type).text}
-                </span>{" "}
+                {(() => {
+                  const disp = formatGeneName(focal, geneIndex[focal]?.feature_type);
+                  return focalLink ? (
+                    <a
+                      href={focalLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600"
+                      style={{ fontStyle: disp.italic ? "italic" : "normal" }}
+                      title="Open in database"
+                    >
+                      {disp.text}
+                    </a>
+                  ) : (
+                    <span
+                      className="text-blue-600"
+                      style={{ fontStyle: disp.italic ? "italic" : "normal" }}
+                    >
+                      {disp.text}
+                    </span>
+                  );
+                })()}{" "}
                 {geneIndex[focal] && (
                   <span className="text-xs text-gray-500">
                     ({geneIndex[focal].start}–{geneIndex[focal].end})
@@ -844,6 +892,7 @@ export default function Page() {
                     const dispName = formatGeneName(row.partner, row.type);
                     const typeDisp = combinedLabel(row.type);
                     const checked = selectedPartners.has(row.partner);
+                    const partnerLink = dbLinkForGene(row.partner);
                     return (
                       <tr
                         key={row.partner}
@@ -857,8 +906,26 @@ export default function Page() {
                             onChange={() => toggleSelect(row.partner)}
                           />
                         </td>
-                        <td className="py-1 pr-4 text-blue-700" style={{ fontStyle: dispName.italic ? "italic" : "normal" }}>
-                          {dispName.text}
+                        <td className="py-1 pr-4">
+                          <span
+                            className="text-blue-700"
+                            style={{ fontStyle: dispName.italic ? "italic" : "normal" }}
+                          >
+                            {dispName.text}
+                          </span>
+                          {partnerLink && (
+                            <a
+                              href={partnerLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open in database"
+                              onClick={(e) => e.stopPropagation()}
+                              className="ml-1 text-blue-600"
+                              style={{ fontSize: "11px" }}
+                            >
+                              ↗
+                            </a>
+                          )}
                         </td>
                         <td className="py-1 pr-4">
                           <span

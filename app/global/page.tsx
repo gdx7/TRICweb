@@ -196,7 +196,10 @@ export default function Page() {
 
   const geneIndex = useMemo(() => {
     const idx: Record<string, Annotation> = {};
-    annotations.forEach(a => (idx[a.gene_name].trim?.() ? (idx[a.gene_name.trim()] = a) : (idx[a.gene_name] = a)));
+    annotations.forEach(a => {
+      const key = (a.gene_name ?? "").trim();
+      idx[key] = a;
+    });
     return idx;
   }, [annotations]);
 
@@ -536,8 +539,8 @@ export default function Page() {
       case "EC":
         return `https://biocyc.org/ECOLI/substring-search?type=NIL&object=${encodeURIComponent(g0)}`;
       case "SS": {
-        // PSJM300_10615 -> PSJM300_RS10615 (only add _RS if not already present)
-        const id = /_RS/.test(g0) ? g0 : g0.replace("_", "_RS");
+        // PSJM300_10615 -> PSJM300_RS10615 (only if not already _RS…)
+        const id = /_RS\d+$/.test(g0) ? g0 : g0.replace(/^([^_]+)_(\d+)$/, "$1_RS$2");
         return `https://biocyc.org/gene?orgid=GCF_000279165&id=${encodeURIComponent(id)}`;
       }
       case "SA":
@@ -1032,7 +1035,7 @@ function ScatterPlot({
   const tickCount = Math.floor(genomeLen / tickStep);
   const mbTicks = Array.from({ length: tickCount }, (_, i) => (i + 1) * 0.5);
 
-  const focalLabel = formatGeneName(focal, focalAnn?.feature_type);
+  const focalBase = baseGene(focal).toLowerCase();
 
   return (
     <div className="w-full overflow-x-auto">
@@ -1073,17 +1076,13 @@ function ScatterPlot({
             <g>
               {(() => {
                 const midAbs = Math.floor((focalAnn.start + focalAnn.end) / 2);
+                const disp = formatGeneName(focal, focalAnn.feature_type);
                 return (
                   <>
                     <line x1={xScale(midAbs)} y1={0} x2={xScale(midAbs)} y2={innerH} stroke="#444" strokeDasharray="3 3" />
                     <polygon points={`${xScale(midAbs)-6},${innerH+10} ${xScale(midAbs)+6},${innerH+10} ${xScale(midAbs)},${innerH+2}`} fill="#000" />
-                    <text
-                      x={xScale(midAbs)}
-                      y={-2}
-                      textAnchor="middle"
-                      style={{ fontStyle: focalLabel.italic ? "italic" : "normal" }}
-                    >
-                      {focalLabel.text} ({focalChimeraTotal})
+                    <text x={xScale(midAbs)} y={-2} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
+                      {disp.text} ({focalChimeraTotal})
                     </text>
                   </>
                 );
@@ -1091,20 +1090,26 @@ function ScatterPlot({
             </g>
           )}
 
-          {/* points */}
-          {[...partners].sort((a,b) => b.counts - a.counts).map((p, idx) => (
-            <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
-              <circle
-                r={sizeScale(p.counts)}
-                fill="#FFFFFF"
-                stroke={colorOf(p.type)}
-                strokeWidth={2}
-                className="cursor-pointer hover:opacity-80"
-                onClick={() => onClickPartner(p.partner)}
-              />
-              <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.12} />
-            </g>
-          ))}
+          {/* points — with RIL/highlight fills */}
+          {[...partners].sort((a,b) => b.counts - a.counts).map((p, idx) => {
+            const partnerBase = baseGene(p.partner).toLowerCase();
+            const rilHit = rilEnabled && rilPairsLower.has(keyForPair(focalBase, partnerBase));
+            const highlighted = highlightSet.has(p.partner);
+            const face = rilHit ? "#2DD4BF" : (highlighted ? "#FFEB3B" : "#FFFFFF");
+            return (
+              <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
+                <circle
+                  r={sizeScale(p.counts)}
+                  fill={face}
+                  stroke={colorOf(p.type)}
+                  strokeWidth={2}
+                  className="cursor-pointer hover:opacity-80"
+                  onClick={() => onClickPartner(p.partner)}
+                />
+                <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.12} />
+              </g>
+            );
+          })}
 
           {/* labels */}
           {labels.map((p, i) => {

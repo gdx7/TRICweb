@@ -32,8 +32,8 @@ type Pair = {
   counts?: number;
   odds_ratio?: number;
   fdr?: number;
-  totals?: number;     // total for target
-  total_ref?: number;  // total for ref (used for focal total)
+  totals?: number;
+  total_ref?: number;
   ref_type?: FeatureType;
   target_type?: FeatureType;
 };
@@ -196,10 +196,7 @@ export default function Page() {
 
   const geneIndex = useMemo(() => {
     const idx: Record<string, Annotation> = {};
-    annotations.forEach(a => {
-      const key = (a.gene_name ?? "").trim();
-      idx[key] = a;
-    });
+    annotations.forEach(a => (idx[a.gene_name.trim()] = a));
     return idx;
   }, [annotations]);
 
@@ -305,7 +302,7 @@ export default function Page() {
       .sort((a, b) => b.rawY - a.rawY);
   }, [pairs, focal, geneIndex, minCounts, excludeTypes, yCap]);
 
-  // per-gene deduped chimera totals (fallback only)
+  // per-gene deduped chimera totals (for Random)
   const totalsByGene = useMemo(() => {
     const per: Map<string, Map<string, number>> = new Map();
     const bump = (g: string, p: string, c: number) => {
@@ -331,21 +328,20 @@ export default function Page() {
     return tot;
   }, [pairs]);
 
-  // NEW: direct totals from file's total_ref (prefer this)
+  // NEW: total_ref taken directly from file (max per gene), fallback to deduped sum if absent
   const totalRefByGene = useMemo(() => {
     const m = new Map<string, number>();
     for (const e of pairs) {
       const ref = String(e.ref || "").trim();
-      const tr = Number(e.total_ref);
-      if (!ref || !Number.isFinite(tr)) continue;
-      const prev = m.get(ref);
-      if (prev == null || tr > prev) m.set(ref, tr);
+      const v = Number(e.total_ref);
+      if (!ref || !Number.isFinite(v)) continue;
+      const prev = m.get(ref) ?? 0;
+      if (v > prev) m.set(ref, v);
     }
     return m;
   }, [pairs]);
 
-  // Prefer total_ref, fallback to previous dedup estimate if absent (keeps demo usable)
-  const focalChimeraTotal = (totalRefByGene.get(focal) ?? totalsByGene.get(focal) ?? 0);
+  const focalChimeraTotal = totalRefByGene.get(focal) ?? totalsByGene.get(focal) ?? 0;
 
   // genome domain
   const genomeStart = useMemo(() => Math.min(...annotations.map(a => a.start)), [annotations]);
@@ -521,6 +517,15 @@ export default function Page() {
     window.open(url, "_blank");
   };
 
+  // Random (≥ 200 deduped chimeras)
+  function pickRandomHigh() {
+    const candidates = allGenes.filter(g => (totalsByGene.get(g) ?? 0) >= 200);
+    const pool = candidates.length ? candidates : allGenes;
+    if (!pool.length) return;
+    const idx = Math.floor(Math.random() * pool.length);
+    setFocal(pool[idx]);
+  }
+
   // --------- DB link helpers (based on selected annotation preset) ---------
   const speciesKey = useMemo<"EC" | "SS" | "SA" | "BS" | "MX" | undefined>(() => {
     const name = (loadedAnnoName || "").toLowerCase();
@@ -539,8 +544,10 @@ export default function Page() {
       case "EC":
         return `https://biocyc.org/ECOLI/substring-search?type=NIL&object=${encodeURIComponent(g0)}`;
       case "SS": {
-        // PSJM300_10615 -> PSJM300_RS10615 (only if not already _RS…)
-        const id = /_RS\d+$/.test(g0) ? g0 : g0.replace(/^([^_]+)_(\d+)$/, "$1_RS$2");
+        // Accept PSJM300_RSxxxxx or PSJM300_xxxxx (insert _RS if missing)
+        let id = g0;
+        const m = /^PSJM300_(\d+)$/i.exec(g0);
+        if (m && !/PSJM300_RS/i.test(g0)) id = `PSJM300_RS${m[1]}`;
         return `https://biocyc.org/gene?orgid=GCF_000279165&id=${encodeURIComponent(id)}`;
       }
       case "SA":
@@ -738,7 +745,7 @@ export default function Page() {
 
             <div className="text-[11px] text-gray-600 mt-2 space-y-1">
               <div><span className="font-semibold">Headers —</span></div>
-              <div><span className="font-medium">Interaction CSV:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), totals, total_ref, …</code></div>
+              <div><span className="font-medium">Interaction CSV:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), …</code></div>
               <div><span className="font-medium">Annotations CSV:</span> <code>gene_name, start, end, feature_type, strand, chromosome</code></div>
             </div>
           </section>
@@ -931,8 +938,8 @@ export default function Page() {
                               rel="noopener noreferrer"
                               title="Open in database"
                               onClick={(e) => e.stopPropagation()}
-                              className="ml-1 text-blue-600"
-                              style={{ fontSize: "11px" }}
+                              className="ml-1 text-blue-700 font-semibold"
+                              style={{ fontSize: "13px" }}
                             >
                               ↗
                             </a>
@@ -1004,6 +1011,7 @@ function ScatterPlot({
 }) {
   const width = 900;
   const height = 520;
+  // Extra room on the right so labels at the end don't get cut off
   const margin = { top: 12, right: 120, bottom: 42, left: 60 };
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
@@ -1030,7 +1038,7 @@ function ScatterPlot({
     })
     .slice(0, 80);
 
-  // Dynamic Mb ticks
+  // Dynamic Mb ticks across the full genome length (every 0.5 Mb)
   const tickStep = 0.5 * 1_000_000;
   const tickCount = Math.floor(genomeLen / tickStep);
   const mbTicks = Array.from({ length: tickCount }, (_, i) => (i + 1) * 0.5);
@@ -1090,10 +1098,12 @@ function ScatterPlot({
             </g>
           )}
 
-          {/* points — with RIL/highlight fills */}
+          {/* points — draw by counts WITHOUT mutating original partners */}
           {[...partners].sort((a,b) => b.counts - a.counts).map((p, idx) => {
+            // RIL-seq teal fill applies to ALL features of the partner gene (CDS/5'/3')
             const partnerBase = baseGene(p.partner).toLowerCase();
             const rilHit = rilEnabled && rilPairsLower.has(keyForPair(focalBase, partnerBase));
+
             const highlighted = highlightSet.has(p.partner);
             const face = rilHit ? "#2DD4BF" : (highlighted ? "#FFEB3B" : "#FFFFFF");
             return (

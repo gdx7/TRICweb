@@ -32,8 +32,8 @@ type Pair = {
   counts?: number;
   odds_ratio?: number;
   fdr?: number;
-  totals?: number;
-  total_ref?: number;
+  totals?: number;     // total for target
+  total_ref?: number;  // total for ref (used for focal total)
   ref_type?: FeatureType;
   target_type?: FeatureType;
 };
@@ -196,7 +196,7 @@ export default function Page() {
 
   const geneIndex = useMemo(() => {
     const idx: Record<string, Annotation> = {};
-    annotations.forEach(a => (idx[a.gene_name.trim()] = a));
+    annotations.forEach(a => (idx[a.gene_name].trim?.() ? (idx[a.gene_name.trim()] = a) : (idx[a.gene_name] = a)));
     return idx;
   }, [annotations]);
 
@@ -302,7 +302,7 @@ export default function Page() {
       .sort((a, b) => b.rawY - a.rawY);
   }, [pairs, focal, geneIndex, minCounts, excludeTypes, yCap]);
 
-  // per-gene deduped chimera totals (for Random)
+  // per-gene deduped chimera totals (fallback only)
   const totalsByGene = useMemo(() => {
     const per: Map<string, Map<string, number>> = new Map();
     const bump = (g: string, p: string, c: number) => {
@@ -328,7 +328,21 @@ export default function Page() {
     return tot;
   }, [pairs]);
 
-  const focalChimeraTotal = totalsByGene.get(focal) ?? 0;
+  // NEW: direct totals from file's total_ref (prefer this)
+  const totalRefByGene = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of pairs) {
+      const ref = String(e.ref || "").trim();
+      const tr = Number(e.total_ref);
+      if (!ref || !Number.isFinite(tr)) continue;
+      const prev = m.get(ref);
+      if (prev == null || tr > prev) m.set(ref, tr);
+    }
+    return m;
+  }, [pairs]);
+
+  // Prefer total_ref, fallback to previous dedup estimate if absent (keeps demo usable)
+  const focalChimeraTotal = (totalRefByGene.get(focal) ?? totalsByGene.get(focal) ?? 0);
 
   // genome domain
   const genomeStart = useMemo(() => Math.min(...annotations.map(a => a.start)), [annotations]);
@@ -504,15 +518,6 @@ export default function Page() {
     window.open(url, "_blank");
   };
 
-  // Random (≥ 200 deduped chimeras)
-  function pickRandomHigh() {
-    const candidates = allGenes.filter(g => (totalsByGene.get(g) ?? 0) >= 200);
-    const pool = candidates.length ? candidates : allGenes;
-    if (!pool.length) return;
-    const idx = Math.floor(Math.random() * pool.length);
-    setFocal(pool[idx]);
-  }
-
   // --------- DB link helpers (based on selected annotation preset) ---------
   const speciesKey = useMemo<"EC" | "SS" | "SA" | "BS" | "MX" | undefined>(() => {
     const name = (loadedAnnoName || "").toLowerCase();
@@ -526,18 +531,21 @@ export default function Page() {
 
   const dbLinkForGene = (gene: string): string | null => {
     if (!speciesKey) return null;
-    const g = baseGene(gene);
+    const g0 = baseGene(gene);
     switch (speciesKey) {
       case "EC":
-        return `https://biocyc.org/ECOLI/substring-search?type=NIL&object=${encodeURIComponent(g)}`;
-      case "SS":
-        return `https://biocyc.org/gene?orgid=GCF_000279165&id=${encodeURIComponent(g)}`;
+        return `https://biocyc.org/ECOLI/substring-search?type=NIL&object=${encodeURIComponent(g0)}`;
+      case "SS": {
+        // PSJM300_10615 -> PSJM300_RS10615 (only add _RS if not already present)
+        const id = /_RS/.test(g0) ? g0 : g0.replace("_", "_RS");
+        return `https://biocyc.org/gene?orgid=GCF_000279165&id=${encodeURIComponent(id)}`;
+      }
       case "SA":
-        return `https://aureowiki.med.uni-greifswald.de/${encodeURIComponent(g)}`;
+        return `https://aureowiki.med.uni-greifswald.de/${encodeURIComponent(g0)}`;
       case "BS":
-        return `https://subtiwiki.uni-goettingen.de/v5/gene/${encodeURIComponent(g)}`;
+        return `https://subtiwiki.uni-goettingen.de/v5/gene/${encodeURIComponent(g0)}`;
       case "MX":
-        return `https://biocyc.org/gene?orgid=GCF_000012685&id=${encodeURIComponent(g)}`;
+        return `https://biocyc.org/gene?orgid=GCF_000012685&id=${encodeURIComponent(g0)}`;
       default:
         return null;
     }
@@ -727,7 +735,7 @@ export default function Page() {
 
             <div className="text-[11px] text-gray-600 mt-2 space-y-1">
               <div><span className="font-semibold">Headers —</span></div>
-              <div><span className="font-medium">Interaction CSV:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), …</code></div>
+              <div><span className="font-medium">Interaction CSV:</span> <code>ref, target, counts, odds_ratio, p_value_FDR (or fdr), totals, total_ref, …</code></div>
               <div><span className="font-medium">Annotations CSV:</span> <code>gene_name, start, end, feature_type, strand, chromosome</code></div>
             </div>
           </section>
@@ -807,7 +815,7 @@ export default function Page() {
           <section className="border rounded-2xl p-4 shadow-sm">
             <div className="flex justify-between items-center mb-3">
               <div className="font-semibold">
-                {" "}
+                Partners for{" "}
                 {(() => {
                   const disp = formatGeneName(focal, geneIndex[focal]?.feature_type);
                   return focalLink ? (
@@ -839,7 +847,7 @@ export default function Page() {
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-600">Selection:</div>
+                <div className="text-xs text-gray-600">Carry selection:</div>
                 <button
                   className="border rounded px-2 py-1 text-xs disabled:opacity-50"
                   disabled={selectedCount === 0}
@@ -993,7 +1001,6 @@ function ScatterPlot({
 }) {
   const width = 900;
   const height = 520;
-  // Extra room on the right so labels at the end don't get cut off
   const margin = { top: 12, right: 120, bottom: 42, left: 60 };
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
@@ -1020,12 +1027,12 @@ function ScatterPlot({
     })
     .slice(0, 80);
 
-  // Dynamic Mb ticks across the full genome length (every 0.5 Mb)
+  // Dynamic Mb ticks
   const tickStep = 0.5 * 1_000_000;
   const tickCount = Math.floor(genomeLen / tickStep);
   const mbTicks = Array.from({ length: tickCount }, (_, i) => (i + 1) * 0.5);
 
-  const focalBase = baseGene(focal).toLowerCase();
+  const focalLabel = formatGeneName(focal, focalAnn?.feature_type);
 
   return (
     <div className="w-full overflow-x-auto">
@@ -1066,13 +1073,17 @@ function ScatterPlot({
             <g>
               {(() => {
                 const midAbs = Math.floor((focalAnn.start + focalAnn.end) / 2);
-                const disp = formatGeneName(focal, focalAnn.feature_type);
                 return (
                   <>
                     <line x1={xScale(midAbs)} y1={0} x2={xScale(midAbs)} y2={innerH} stroke="#444" strokeDasharray="3 3" />
                     <polygon points={`${xScale(midAbs)-6},${innerH+10} ${xScale(midAbs)+6},${innerH+10} ${xScale(midAbs)},${innerH+2}`} fill="#000" />
-                    <text x={xScale(midAbs)} y={-2} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
-                      {disp.text} ({focalChimeraTotal})
+                    <text
+                      x={xScale(midAbs)}
+                      y={-2}
+                      textAnchor="middle"
+                      style={{ fontStyle: focalLabel.italic ? "italic" : "normal" }}
+                    >
+                      {focalLabel.text} ({focalChimeraTotal})
                     </text>
                   </>
                 );
@@ -1080,28 +1091,20 @@ function ScatterPlot({
             </g>
           )}
 
-          {/* points — draw by counts WITHOUT mutating original partners */}
-          {[...partners].sort((a,b) => b.counts - a.counts).map((p, idx) => {
-            // RIL-seq teal fill applies to ALL features of the partner gene (CDS/5'/3')
-            const partnerBase = baseGene(p.partner).toLowerCase();
-            const rilHit = rilEnabled && rilPairsLower.has(keyForPair(focalBase, partnerBase));
-
-            const highlighted = highlightSet.has(p.partner);
-            const face = rilHit ? "#2DD4BF" : (highlighted ? "#FFEB3B" : "#FFFFFF");
-            return (
-              <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
-                <circle
-                  r={sizeScale(p.counts)}
-                  fill={face}
-                  stroke={colorOf(p.type)}
-                  strokeWidth={2}
-                  className="cursor-pointer hover:opacity-80"
-                  onClick={() => onClickPartner(p.partner)}
-                />
-                <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.12} />
-              </g>
-            );
-          })}
+          {/* points */}
+          {[...partners].sort((a,b) => b.counts - a.counts).map((p, idx) => (
+            <g key={idx} transform={`translate(${xScale(p.x)},${yScale(p.y)})`}>
+              <circle
+                r={sizeScale(p.counts)}
+                fill="#FFFFFF"
+                stroke={colorOf(p.type)}
+                strokeWidth={2}
+                className="cursor-pointer hover:opacity-80"
+                onClick={() => onClickPartner(p.partner)}
+              />
+              <line x1={0} y1={0} x2={0} y2={Math.max(0, innerH - yScale(p.y))} stroke="#999" strokeDasharray="2 3" opacity={0.12} />
+            </g>
+          ))}
 
           {/* labels */}
           {labels.map((p, i) => {

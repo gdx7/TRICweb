@@ -2,6 +2,7 @@ import Link from "next/link";
 
 export const metadata = {
   title: "TRIC-seq explorer guide",
+  
   description:
     "How TRIC-seq works, how to interpret the dataset, and how to use globalMAP, csMAP, pairMAP, and foldMAP.",
 };
@@ -12,10 +13,12 @@ export default function HelpPage() {
       <header className="mb-4">
         <h1 className="text-2xl font-semibold mb-1">TRIC-seq explorer guide</h1>
         <p className="text-red-600 font-semibold">
+          
           Important: after selecting a preset file, please wait briefly while the tool loads
           the interaction and chimera files. Once loaded you can interact with these dataset without delay.
         </p>
         <p className="text-slate-700">
+          
           A quick guide to TRIC-seq and how to explore RNA–RNA interactions,
           structures, and regulons using the tools in this site.
         </p>
@@ -59,7 +62,7 @@ export default function HelpPage() {
           <section id="overview" className="space-y-3">
             <h2 className="text-xl font-semibold">Overview: What is TRIC-seq?</h2>
             <p>
-              <strong>TRIC-seq (Total RNA Interaction Capture)</strong> is an <em>in situ</em>,
+              <strong>TRIC-seq (Total RNA Interactome Capture)</strong> is an <em>in situ</em>,
               genetics-free proximity-ligation method that maps native RNA–RNA contacts across
               bacterial transcriptomes. It preserves cellular context, capturing both
               <em> intramolecular</em> (structure) and <em>intermolecular</em> (regulatory/proximity)
@@ -199,8 +202,6 @@ export default function HelpPage() {
               <li>Select a species preset.</li>
               <li>Add two or more RNAs to compare (e.g., hub sRNAs or candidate sponges).</li>
               <li>
-                Adjust <span><em>i</em><sub>o</sub></span>/<span><em>O</em><sup>f</sup></span> thresholds and feature filters to reveal core vs. peripheral partners.
-              </li>
               <li>
                 Use differences in partner classes (5′UTR vs. CDS) to infer logic; copy candidate pairs to{" "}
                 <Link href="/pairmap" className="text-blue-600 hover:underline">

@@ -29,14 +29,14 @@ type Pair = {
 
 const FEATURE_COLORS: Record<FeatureType, string> = {
   ncRNA: "#A40194",
-  sRNA:  "#A40194",
-  sponge:"#F12C2C",
-  tRNA:  "#82F778",
+  sRNA: "#A40194",
+  sponge: "#F12C2C",
+  tRNA: "#82F778",
   hkRNA: "#999999",
-  rRNA:  "#999999",
-  CDS:   "#F78208",
-  "5'UTR":"#76AAD7",
-  "3'UTR":"#0C0C0C",
+  rRNA: "#999999",
+  CDS: "#F78208",
+  "5'UTR": "#76AAD7",
+  "3'UTR": "#0C0C0C",
 };
 const cf = (s: string) => String(s || "").trim().toLowerCase();
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -74,11 +74,11 @@ function simulateCsData() {
     });
   };
   // hubby sRNA targets + some CDS-CDS
-  ["gene2","gene3","gene5","gene8","gene11"].forEach(g => add("srna1", g, 55, 240));
-  ["gene1","gene4","gene6","gene9","gene12"].forEach(g => add("srna2", g, 48, 180));
-  ["gene7","gene10"].forEach(g => add("ncRNA1", g, 35, 90));
-  add("gene2","gene9", 25, 40);
-  add("gene3","gene7", 22, 35);
+  ["gene2", "gene3", "gene5", "gene8", "gene11"].forEach(g => add("srna1", g, 55, 240));
+  ["gene1", "gene4", "gene6", "gene9", "gene12"].forEach(g => add("srna2", g, 48, 180));
+  ["gene7", "gene10"].forEach(g => add("ncRNA1", g, 35, 90));
+  add("gene2", "gene9", 25, 40);
+  add("gene3", "gene7", 22, 35);
 
   return { ann, pairs };
 }
@@ -164,17 +164,56 @@ export default function CsMapPage() {
     return m;
   }, [anno]);
 
-  async function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    const text = await f.text();
-    setPairs(parsePairsCSV(text));
-    setLoadedPairsName(f.name);
+    setLoadedPairsName(f.name + " (loading...)");
+    Papa.parse<Pair>(f, {
+      header: true,
+      dynamicTyping: true,
+      skipEmptyLines: true,
+      worker: true,
+      complete: (results) => {
+        const parsed = (results.data as any[])
+          .filter((r) => r.ref && r.target)
+          .map((r) => ({
+            ref: String(r.ref).trim(),
+            target: String(r.target).trim(),
+            counts: Number(r.counts) || 0,
+            odds_ratio: Number(r.odds_ratio) || 0,
+            totals: r.totals != null ? Number(r.totals) : undefined,
+            total_ref: r.total_ref != null ? Number(r.total_ref) : undefined,
+            ref_type: r.ref_type,
+            target_type: r.target_type,
+          }));
+        setPairs(parsed);
+        setLoadedPairsName(f.name);
+      }
+    });
   }
-  async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
+
+  function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    const text = await f.text();
-    setAnno(parseAnnoCSV(text));
-    setLoadedAnnoName(f.name);
+    setLoadedAnnoName(f.name + " (loading...)");
+    Papa.parse<any>(f, {
+      header: true,
+      dynamicTyping: true,
+      skipEmptyLines: true,
+      worker: true,
+      complete: (results) => {
+        const parsed = (results.data as any[])
+          .filter((r) => r.gene_name && (r.start != null) && (r.end != null))
+          .map((r) => ({
+            gene_name: String(r.gene_name).trim(),
+            start: Number(r.start),
+            end: Number(r.end),
+            feature_type: r.feature_type,
+            strand: r.strand,
+            chromosome: r.chromosome,
+          }));
+        setAnno(parsed);
+        setLoadedAnnoName(f.name);
+      }
+    });
   }
 
   async function loadPresetAnno(path: string, label?: string) {
@@ -392,123 +431,136 @@ export default function CsMapPage() {
       </div>
 
       {/* Collapsed scatter */}
-      <div className="relative overflow-x-auto rounded-lg border bg-white">
-        <button
-          onClick={() => exportSVG("csmap-scatter", "csMAP_scatter")}
-          className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
-        >
-          Export SVG
-        </button>
-        <svg id="csmap-scatter" width={W} height={SC_H} style={{ display: "block" }}>
-          <defs>
-            <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style>
-          </defs>
-          <g transform={`translate(${margin.left},${margin.top})`}>
-            <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
-            {geneList.map((g, i) => {
-              const cx = ((i + 0.5) / geneList.length) * innerW;
-              const annG = annoByCF.get(cf(g));
-              const disp = formatGeneName(g, annG?.feature_type);
-              return (
-                <g key={i} transform={`translate(${cx},${innerH})`}>
-                  <line y2={6} stroke="#222" />
-                  <text y={24} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
-                    {disp.text}
-                  </text>
-                </g>
-              );
-            })}
-            {[0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].map((v, i) => {
-              const t = v <= 10 ? v / 10 : 1 + Math.log10(v / 10);
-              return (
-                <g key={i} transform={`translate(0,${yPix(t)})`}>
-                  <line x2={-6} stroke="#222" />
-                  <text x={-9} y={3} textAnchor="end">{v}</text>
-                  <line x1={0} x2={innerW} y1={0} y2={0} stroke="#eef2f7" />
-                </g>
-              );
-            })}
-            <text transform={`translate(${-50},${innerH/2}) rotate(-90)`}>Odds ratio (symlog)</text>
+      <div className="rounded-lg border bg-white overflow-hidden">
+        <div className="flex justify-between items-center px-4 py-2 border-b bg-slate-50">
+          <span className="font-semibold text-sm">Target Profiles</span>
+          <button
+            onClick={() => exportSVG("csmap-scatter", "csMAP_scatter")}
+            className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-100"
+          >
+            Export SVG
+          </button>
+        </div>
+        <div className="overflow-x-auto relative">
+          <svg id="csmap-scatter" width={W} height={SC_H} style={{ display: "block" }}>
+            <defs>
+              <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style>
+            </defs>
+            <g transform={`translate(${margin.left},${margin.top})`}>
+              <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="#222" />
+              {geneList.map((g, i) => {
+                const cx = ((i + 0.5) / geneList.length) * innerW;
+                const annG = annoByCF.get(cf(g));
+                const disp = formatGeneName(g, annG?.feature_type);
+                return (
+                  <g key={i} transform={`translate(${cx},${innerH})`}>
+                    <line y2={6} stroke="#222" />
+                    <text y={24} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
+                      {disp.text}
+                    </text>
+                  </g>
+                );
+              })}
+              {[0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].map((v, i) => {
+                const t = v <= 10 ? v / 10 : 1 + Math.log10(v / 10);
+                return (
+                  <g key={i} transform={`translate(0,${yPix(t)})`}>
+                    <line x2={-6} stroke="#222" />
+                    <text x={-9} y={3} textAnchor="end">{v}</text>
+                    <line x1={0} x2={innerW} y1={0} y2={0} stroke="#eef2f7" />
+                  </g>
+                );
+              })}
+              <text transform={`translate(${-50},${innerH / 2}) rotate(-90)`}>
+                <title>Symmetric logarithmic scale: pseudo-log behavior for large numbers while handling zero and negative values</title>
+                Odds ratio (symlog)
+              </text>
 
-            {dots.map((d, idx) => {
-              const cx = ((d.col + 0.5) / geneList.length) * innerW + (Math.random() - 0.5) * 6;
-              const cy = yPix(d.yT);
-              return (
-                <g key={idx} transform={`translate(${cx},${cy})`}>
-                  <circle r={d.r} fill="#fff" stroke={d.stroke} strokeWidth={2} />
-                </g>
-              );
-            })}
-          </g>
-        </svg>
+              {dots.map((d, idx) => {
+                const cx = ((d.col + 0.5) / geneList.length) * innerW + (Math.random() - 0.5) * 6;
+                const cy = yPix(d.yT);
+                return (
+                  <g key={idx} transform={`translate(${cx},${cy})`}>
+                    <circle r={d.r} fill="#fff" stroke={d.stroke} strokeWidth={2} />
+                  </g>
+                );
+              })}
+            </g>
+          </svg>
 
-        <div className="px-4 pb-4">
-          <div className="mt-2 flex flex-wrap gap-4 items-center">
-            <span className="text-sm font-medium">Feature types</span>
-            {[
-              { key: "CDS", color: FEATURE_COLORS.CDS, label: "CDS" },
-              { key: "5'UTR", color: FEATURE_COLORS["5'UTR"], label: "5'UTR" },
-              { key: "3'UTR", color: FEATURE_COLORS["3'UTR"], label: "3'UTR" },
-              { key: "sRNA/ncRNA", color: FEATURE_COLORS.sRNA, label: "sRNA/ncRNA" },
-              { key: "tRNA", color: FEATURE_COLORS.tRNA, label: "tRNA" },
-              { key: "rRNA/hkRNA", color: FEATURE_COLORS.rRNA, label: "rRNA/hkRNA" },
-              { key: "sponge", color: FEATURE_COLORS.sponge, label: "Sponge" },
-            ].map((item) => (
-              <span key={item.key} className="inline-flex items-center gap-2 text-xs">
-                <span
-                  className="inline-block w-3 h-3 rounded-full border"
-                  style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}
-                />
-                {item.label}
-              </span>
-            ))}
-            <span className="ml-4 text-xs text-slate-500">Circle area ∝ counts</span>
+          <div className="px-4 pb-4">
+            <div className="mt-2 flex flex-wrap gap-4 items-center">
+              <span className="text-sm font-medium">Feature types</span>
+              {[
+                { key: "CDS", color: FEATURE_COLORS.CDS, label: "CDS" },
+                { key: "5'UTR", color: FEATURE_COLORS["5'UTR"], label: "5'UTR" },
+                { key: "3'UTR", color: FEATURE_COLORS["3'UTR"], label: "3'UTR" },
+                { key: "sRNA/ncRNA", color: FEATURE_COLORS.sRNA, label: "sRNA/ncRNA" },
+                { key: "tRNA", color: FEATURE_COLORS.tRNA, label: "tRNA" },
+                { key: "rRNA/hkRNA", color: FEATURE_COLORS.rRNA, label: "rRNA/hkRNA" },
+                { key: "sponge", color: FEATURE_COLORS.sponge, label: "Sponge" },
+              ].map((item) => (
+                <span key={item.key} className="inline-flex items-center gap-2 text-xs">
+                  <span
+                    className="inline-block w-3 h-3 rounded-full border"
+                    style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}
+                  />
+                  {item.label}
+                </span>
+              ))}
+              <span className="ml-4 text-xs text-slate-500">Circle area ∝ counts</span>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Totals bar chart (log10) */}
-      <div className="relative overflow-x-auto rounded-lg border bg-white mt-6">
-        <button
-          onClick={() => exportSVG("csmap-bars", "csMAP_totals")}
-          className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
-        >
-          Export SVG
-        </button>
-        <svg id="csmap-bars" width={W} height={BAR_H} style={{ display: "block" }}>
-          <defs>
-            <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style>
-          </defs>
-        <g transform={`translate(${bMargin.left},${bMargin.top})`}>
-            <line x1={0} y1={bInnerH} x2={bInnerW} y2={bInnerH} stroke="#222" />
-            {barTicks.map((v, i) => {
-              const y = barY(v);
-              return (
-                <g key={i} transform={`translate(0,${y})`}>
-                  <line x2={-6} stroke="#222" />
-                  <text x={-9} y={3} textAnchor="end">{v}</text>
-                  <line x1={0} x2={bInnerW} y1={0} y2={0} stroke="#eef2f7" />
-                </g>
-              );
-            })}
-            <text transform={`translate(${-46},${bInnerH/2}) rotate(-90)`}>Total interactions (log10)</text>
+      <div className="rounded-lg border bg-white mt-6 overflow-hidden">
+        <div className="flex justify-between items-center px-4 py-2 border-b bg-slate-50">
+          <span className="font-semibold text-sm">Total Interactions</span>
+          <button
+            onClick={() => exportSVG("csmap-bars", "csMAP_totals")}
+            className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-100"
+          >
+            Export SVG
+          </button>
+        </div>
+        <div className="overflow-x-auto relative">
+          <svg id="csmap-bars" width={W} height={BAR_H} style={{ display: "block" }}>
+            <defs>
+              <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style>
+            </defs>
+            <g transform={`translate(${bMargin.left},${bMargin.top})`}>
+              <line x1={0} y1={bInnerH} x2={bInnerW} y2={bInnerH} stroke="#222" />
+              {barTicks.map((v, i) => {
+                const y = barY(v);
+                return (
+                  <g key={i} transform={`translate(0,${y})`}>
+                    <line x2={-6} stroke="#222" />
+                    <text x={-9} y={3} textAnchor="end">{v}</text>
+                    <line x1={0} x2={bInnerW} y1={0} y2={0} stroke="#eef2f7" />
+                  </g>
+                );
+              })}
+              <text transform={`translate(${-46},${bInnerH / 2}) rotate(-90)`}>Total interactions (log10)</text>
 
-            {totals.map((t, i) => {
-              const x = (i + 0.5) * (bInnerW / Math.max(1, totals.length)) - barW / 2;
-              const y = barY(Math.max(1, t.total));
-              const h = bInnerH - y;
-              const disp = formatGeneName(t.gene, t.type);
-              return (
-                <g key={i}>
-                  <rect x={x} y={y} width={barW} height={h} fill="#93c5fd" stroke="#60a5fa" />
-                  <text x={x + barW / 2} y={bInnerH + 18} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
-                    {disp.text}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-        </svg>
+              {totals.map((t, i) => {
+                const x = (i + 0.5) * (bInnerW / Math.max(1, totals.length)) - barW / 2;
+                const y = barY(Math.max(1, t.total));
+                const h = bInnerH - y;
+                const disp = formatGeneName(t.gene, t.type);
+                return (
+                  <g key={i}>
+                    <rect x={x} y={y} width={barW} height={h} fill="#93c5fd" stroke="#60a5fa" />
+                    <text x={x + barW / 2} y={bInnerH + 18} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
+                      {disp.text}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          </svg>
+        </div>
       </div>
 
       {warnings.length > 0 && (

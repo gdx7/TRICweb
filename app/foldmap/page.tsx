@@ -301,11 +301,54 @@ export default function FoldMapPage() {
     return { ws, we, prof, smooth: sm, peaks };
   }, [geneRow, ints, flank, profileWin, profileMinDist, profilePromFactor]);
 
-  async function onAnnFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function onAnnFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    const text = await f.text();
-    setAnn(parseAnnotationCSV(text));
-    setAnnFileName(f.name);
+    setAnnFileName(f.name + " (loading...)");
+    Papa.parse<any>(f, {
+      header: false, // Start with false to check format first line if needed; but since Papa.parse doesn't easily let us inspect the first line then cleanly restart, we can just parse everything dynamically.
+      dynamicTyping: true,
+      skipEmptyLines: true,
+      worker: true,
+      complete: (results) => {
+        const data = results.data as any[];
+        if (!data.length) { setAnn([]); setAnnFileName(f.name); return; }
+        const first = data[0];
+        const looksHeadered =
+          typeof first[0] === "string" &&
+          ["gene_name", "RNA"].includes(String(first[0]).trim());
+        let parsed: Annotation[] = [];
+        if (looksHeadered) {
+          // We parsed it without headers. Since the first row is headers, we'll map manually or slice.
+          const headers = first.map((h: any) => String(h).toLowerCase().trim());
+          const nameIdx = headers.indexOf("gene_name") !== -1 ? headers.indexOf("gene_name") : headers.indexOf("rna");
+          const startIdx = headers.indexOf("start");
+          const endIdx = headers.indexOf("end");
+          const strandIdx = headers.indexOf("strand") !== -1 ? headers.indexOf("strand") : headers.indexOf("Strand");
+          const chrIdx = headers.indexOf("chromosome") !== -1 ? headers.indexOf("chromosome") : headers.indexOf("Chromosome");
+          const featureIdx = headers.indexOf("feature_type");
+
+          parsed = data.slice(1).filter((r) => r[nameIdx] && r[startIdx] != null && r[endIdx] != null).map((r) => ({
+            gene_name: String(r[nameIdx]).trim(),
+            start: Number(r[startIdx]),
+            end: Number(r[endIdx]),
+            strand: strandIdx !== -1 ? r[strandIdx] : undefined,
+            chromosome: chrIdx !== -1 ? r[chrIdx] : undefined,
+            feature_type: featureIdx !== -1 ? r[featureIdx] : undefined,
+          }));
+        } else {
+          parsed = data.filter((r) => r[0] && r[1] != null && r[2] != null).map((r) => ({
+            gene_name: String(r[0]).trim(),
+            start: Number(r[1]),
+            end: Number(r[2]),
+            strand: r[4] ?? r[3],
+            chromosome: undefined,
+          }));
+        }
+
+        setAnn(parsed);
+        setAnnFileName(f.name);
+      }
+    });
   }
   async function onIntsFileList(files: FileList) {
     const arr = await parseInteractionFiles(files);
@@ -473,12 +516,11 @@ export default function FoldMapPage() {
                 id="ann-file"
                 label="Choose File"
                 accept=".csv,text/csv,application/vnd.ms-excel"
-                onFiles={async (files) => {
+                onFiles={(files) => {
                   const f = files[0];
                   if (!f) return;
-                  const text = await f.text();
-                  setAnn(parseAnnotationCSV(text));
-                  setAnnFileName(f.name);
+                  // We simulate the React event to reuse our onAnnFile logic
+                  onAnnFile({ target: { files: [f] } } as unknown as React.ChangeEvent<HTMLInputElement>);
                 }}
               />
             </div>
@@ -528,7 +570,7 @@ export default function FoldMapPage() {
             <div className="text-xs text-gray-500">
               {geneRow ? (
                 <>Loaded: <span className="font-medium" style={{ fontStyle: dispGene?.italic ? "italic" : "normal" }}>{dispGene?.text}</span> — {geneRow.start}–{geneRow.end} ({(geneRow.strand || "+").toString()})</>
-              ) : selectedGene ? ( <>No match for “{selectedGene}”.</> ) : ( <>Type a gene and press Load.</> )}
+              ) : selectedGene ? (<>No match for “{selectedGene}”.</>) : (<>Type a gene and press Load.</>)}
             </div>
           </section>
 
@@ -542,7 +584,7 @@ export default function FoldMapPage() {
             <input type="range" min={0} max={500} step={10} value={flank} onChange={(e) => setFlank(Number(e.target.value))} className="w-full" />
 
             <div className="text-xs text-gray-700 flex items-center gap-2">
-              <span>Normalization:</span>
+              <span title="Method to normalize the raw interaction frequencies (e.g. Iterative Correction and Eigenvector decomposition)" className="cursor-help border-b border-dotted border-slate-400">Normalization:</span>
               <select className="border rounded px-2 py-1 h-8 text-sm" value={norm} onChange={(e) => (setNorm(e.target.value as any))}>
                 <option value="raw">Raw</option>
                 <option value="ice">ICE</option>
@@ -565,7 +607,9 @@ export default function FoldMapPage() {
             <label className="text-xs text-gray-600">Peak min distance: {profileMinDist} nt</label>
             <input type="range" min={1} max={30} step={1} value={profileMinDist} onChange={(e) => setProfileMinDist(Number(e.target.value))} className="w-full" />
 
-            <label className="text-xs text-gray-600">Prominence factor: {profilePromFactor.toFixed(2)} × σ</label>
+            <label className="text-xs text-gray-600">
+              <span title="How prominent a peak must be relative to the background signal (standard deviation)" className="cursor-help border-b border-dotted border-slate-400">Prominence factor</span>: {profilePromFactor.toFixed(2)} × σ
+            </label>
             <input
               type="range"
               min={5}

@@ -24,12 +24,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span className="text-lg font-semibold">TRIC-seq Interactome Explorer</span>
             </Link>
             <nav className={`flex items-center gap-2 ${sora.className}`}>
-              <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/global">globalMAP</Link>
-              <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/csmap">csMAP</Link>
-              <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/pairmap">pairMAP</Link>
-              <Link className="px-3 py-1 rounded hover:bg-slate-100" href="/foldmap">foldMAP</Link>
-              {/* NEW: Help (italic) */}
-              <Link className="px-3 py-1 rounded hover:bg-slate-100 italic" href="/help">Help</Link>
+              <Link className="px-3 py-1 rounded hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-slate-400 focus:outline-none" href="/global">globalMAP</Link>
+              <Link className="px-3 py-1 rounded hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-slate-400 focus:outline-none" href="/csmap">csMAP</Link>
+              <Link className="px-3 py-1 rounded hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-slate-400 focus:outline-none" href="/pairmap">pairMAP</Link>
+              <Link className="px-3 py-1 rounded hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-slate-400 focus:outline-none" href="/foldmap">foldMAP</Link>
+              {/* Help */}
+              <Link className="px-3 py-1 rounded hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-slate-400 focus:outline-none italic" href="/help">Help</Link>
             </nav>
           </div>
         </header>

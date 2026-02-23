@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useMemo } from "react";
 
-const FEATURE_COLORS = ["#F78208","#76AAD7","#0C0C0C","#A40194","#82F778","#999999","#F12C2C","#C4C5C5"];
+const FEATURE_COLORS = ["#F78208", "#76AAD7", "#0C0C0C", "#A40194", "#82F778", "#999999", "#F12C2C", "#C4C5C5"];
 
 type Bubble = { top: number; left: number; size: number; color: string; delay: number; dur: number; dx: number; dy: number; blur: number; };
 
@@ -48,8 +48,8 @@ export default function Home() {
         ))}
       </div>
 
-      {/* HERO — previously 80svh, now ~65svh (15% less) */}
-      <section className="relative mx-auto max-w-5xl px-6 pt-14 pb-2 sm:pt-18 sm:pb-3 min-h-[65svh]">
+      {/* HERO */}
+      <section className="relative mx-auto max-w-6xl px-6 pt-16 pb-12 sm:pt-24 sm:pb-16 min-h-[60svh]">
         {/* Title row: bigger logo, smaller title */}
         <div className="flex items-center gap-3">
           <img src="/tric-logo.png" alt="TRIC-seq logo" className="h-16 w-16 sm:h-20 sm:w-20" />
@@ -75,13 +75,15 @@ function ToolCard({ title, desc, href }: { title: string; desc: string; href: st
   return (
     <Link
       href={href}
-      className="group block rounded-2xl border bg-white/80 backdrop-blur shadow-sm hover:shadow-md transition
-                 p-6 ring-1 ring-slate-200 hover:ring-slate-300"
+      className="group flex flex-col justify-between rounded-2xl border bg-white/80 backdrop-blur shadow-sm hover:shadow-md transition
+                 p-6 h-full ring-1 ring-slate-200 hover:ring-slate-300 focus-visible:ring-2 focus-visible:ring-slate-400 focus:outline-none"
     >
-      <div className="text-xl font-semibold">{title}</div>
-      <p className="mt-2 text-slate-600 text-sm">{desc}</p>
-      <div className="mt-4 inline-flex items-center gap-1 text-blue-600 group-hover:gap-2 transition">
-        Open →
+      <div>
+        <div className="text-xl font-semibold">{title}</div>
+        <p className="mt-2 text-slate-600 text-sm">{desc}</p>
+      </div>
+      <div className="mt-6 inline-flex w-fit items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 group-focus-visible:ring-2 group-focus-visible:ring-slate-400 group-focus-visible:ring-offset-2">
+        Open <span className="transition-transform group-hover:translate-x-1">→</span>
       </div>
     </Link>
   );

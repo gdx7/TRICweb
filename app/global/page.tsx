@@ -298,9 +298,32 @@ export default function Page() {
 
     return Array.from(acc.values())
       .filter(r => r.counts >= minCounts)
-      .filter(r => !excludeTypes.includes(r.type))
-      .sort((a, b) => b.rawY - a.rawY);
+      .filter(r => !excludeTypes.includes(r.type));
   }, [pairs, focal, geneIndex, minCounts, excludeTypes, yCap]);
+
+  // Sorting State
+  const [sortBy, setSortBy] = useState<"odds_ratio" | "counts" | "fdr" | "distance" | "start">("odds_ratio");
+  const [sortDesc, setSortDesc] = useState(true);
+
+  const sortedPartners = useMemo(() => {
+    const sorted = [...partners];
+    sorted.sort((a, b) => {
+      let valA, valB;
+      if (sortBy === "odds_ratio") { valA = a.rawY; valB = b.rawY; }
+      else if (sortBy === "counts") { valA = a.counts; valB = b.counts; }
+      else if (sortBy === "fdr") {
+        // handle undefined/null FDRs by pushing them to the end conceptually
+        valA = a.fdr != null ? -a.fdr : -999;
+        valB = b.fdr != null ? -b.fdr : -999;
+      }
+      else if (sortBy === "distance") { valA = a.distance; valB = b.distance; }
+      else if (sortBy === "start") { valA = a.start; valB = b.start; }
+      else { valA = a.rawY; valB = b.rawY; }
+
+      return sortDesc ? valB - valA : valA - valB;
+    });
+    return sorted;
+  }, [partners, sortBy, sortDesc]);
 
   // per-gene deduped chimera totals (for Random)
   const totalsByGene = useMemo(() => {
@@ -364,7 +387,7 @@ export default function Page() {
     if (match) setFocal(match);
   }
 
-  // ---- CSV parsing ----
+  // ---- CSV parsing for URLs/Presets ----
   function parsePairsCSV(csv: string) {
     const { data } = Papa.parse<any>(csv, { header: true, dynamicTyping: true, skipEmptyLines: true });
     const rows: Pair[] = (data as any[])
@@ -401,24 +424,66 @@ export default function Page() {
     return rows;
   }
 
-  async function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function onPairsFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const text = await file.text();
-    const parsed = parsePairsCSV(text);
-    setData(prev => ({ ...prev, pairs: parsed }));
-    setLoadedPairsName(file.name);
-    clearSelection();
+    setLoadedPairsName(file.name + " (loading...)");
+    Papa.parse<any>(file, {
+      header: true,
+      dynamicTyping: true,
+      skipEmptyLines: true,
+      worker: true,
+      complete: (results) => {
+        const rows: Pair[] = (results.data as any[])
+          .filter((r) => r.ref && r.target)
+          .map((r) => {
+            const rawFdr = r.p_value_FDR ?? r.fdr ?? r.FDR ?? r.fdr_adj ?? r.p_adj;
+            const fdrNum = rawFdr != null && rawFdr !== "" ? Number(rawFdr) : undefined;
+            return {
+              ref: String(r.ref).trim(),
+              target: String(r.target).trim(),
+              counts: r.counts != null ? Number(r.counts) : undefined,
+              odds_ratio: r.odds_ratio != null ? Number(r.odds_ratio) : undefined,
+              fdr: Number.isFinite(fdrNum as number) ? (fdrNum as number) : undefined,
+              totals: r.totals != null ? Number(r.totals) : undefined,
+              total_ref: r.total_ref != null ? Number(r.total_ref) : undefined,
+              ref_type: r.ref_type,
+              target_type: r.target_type,
+            };
+          });
+        setData(prev => ({ ...prev, pairs: rows }));
+        setLoadedPairsName(file.name);
+        clearSelection();
+      }
+    });
   }
-  async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
+
+  function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const text = await file.text();
-    const parsed = parseAnnoCSV(text);
-    setData(prev => ({ ...prev, annotations: parsed }));
-    setLoadedAnnoName(file.name);
-    if (parsed.length > 0) setFocal(parsed[0].gene_name);
-    clearSelection();
+    setLoadedAnnoName(file.name + " (loading...)");
+    Papa.parse<any>(file, {
+      header: true,
+      dynamicTyping: true,
+      skipEmptyLines: true,
+      worker: true,
+      complete: (results) => {
+        const rows: Annotation[] = (results.data as any[])
+          .filter(r => r.gene_name && (r.start != null) && (r.end != null))
+          .map(r => ({
+            gene_name: String(r.gene_name).trim(),
+            start: Number(r.start),
+            end: Number(r.end),
+            feature_type: r.feature_type,
+            strand: r.strand,
+            chromosome: r.chromosome,
+          }));
+        setData(prev => ({ ...prev, annotations: rows }));
+        setLoadedAnnoName(file.name);
+        if (rows.length > 0) setFocal(rows[0].gene_name);
+        clearSelection();
+      }
+    });
   }
 
   async function loadPresetAnno(path: string, label: string) {
@@ -482,7 +547,7 @@ export default function Page() {
   }
 
   function exportPartnersCSV() {
-    const header = ["Partner","Feature","Start","End","io","Of","FDR","Distance"];
+    const header = ["Partner", "Feature", "Start", "End", "io", "Of", "FDR", "Distance"];
     const rows = partners.map(p => [
       p.partner,
       combinedLabel(p.type).label,
@@ -603,7 +668,7 @@ export default function Page() {
             <div className="font-semibold">Filters</div>
 
             <label className="text-xs text-gray-600">
-              Min interactions (<span><em>i</em><sub>o</sub></span>): {minCounts}
+              Min interactions (<span title="Raw chimeric reads (minimum required)" className="cursor-help border-b border-dotted border-slate-400"><em>i</em><sub>o</sub></span>): {minCounts}
             </label>
             <input
               type="range"
@@ -616,7 +681,7 @@ export default function Page() {
             />
 
             <label className="text-xs text-gray-600">
-              Y cap (odds ratio <span><em>O</em><sup><em>f</em></sup></span>): {yCap}
+              Y cap (odds ratio <span title="Odds ratio (interaction enrichment)" className="cursor-help border-b border-dotted border-slate-400"><em>O</em><sup><em>f</em></sup></span>): {yCap}
             </label>
             <input
               type="range"
@@ -629,7 +694,7 @@ export default function Page() {
             />
 
             <label className="text-xs text-gray-600">
-              Label threshold (<span><em>O</em><sup><em>f</em></sup></span>): {labelThreshold}
+              Label threshold (<span title="Odds ratio (interaction enrichment)" className="cursor-help border-b border-dotted border-slate-400"><em>O</em><sup><em>f</em></sup></span>): {labelThreshold}
             </label>
             <input
               type="range"
@@ -882,7 +947,7 @@ export default function Page() {
                   Clear
                 </button>
                 <div className="text-xs text-gray-500 ml-2">
-                  sorted by <em>O</em><sup><em>f</em></sup>
+                  sorted by <span className="font-semibold">{sortBy}</span> {sortDesc ? "↓" : "↑"}
                 </div>
                 <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
                   Export table CSV
@@ -897,16 +962,28 @@ export default function Page() {
                     <th className="py-1 pr-4">✓</th>
                     <th className="py-1 pr-4">Partner</th>
                     <th className="py-1 pr-4">Feature</th>
-                    <th className="py-1 pr-4">Start</th>
+                    <th className="py-1 pr-4 cursor-pointer hover:text-blue-600 select-none" onClick={() => { setSortBy("start"); setSortDesc(sortBy === "start" ? !sortDesc : false); }}>
+                      Start {sortBy === "start" ? (sortDesc ? "↓" : "↑") : ""}
+                    </th>
                     <th className="py-1 pr-4">End</th>
-                    <th className="py-1 pr-4"><span><em>i</em><sub>o</sub></span></th>
-                    <th className="py-1 pr-4"><span><em>O</em><sup><em>f</em></sup></span></th>
-                    <th className="py-1 pr-4">FDR</th>
-                    <th className="py-1 pr-4">Distance</th>
+                    <th className="py-1 pr-4 cursor-pointer hover:text-blue-600 select-none" onClick={() => { setSortBy("counts"); setSortDesc(sortBy === "counts" ? !sortDesc : true); }}>
+                      <span title="Raw chimeric reads (minimum required)" className="cursor-help border-b border-dotted border-slate-400 font-normal"><em>i</em><sub>o</sub></span>
+                      {sortBy === "counts" ? (sortDesc ? "↓" : "↑") : ""}
+                    </th>
+                    <th className="py-1 pr-4 cursor-pointer hover:text-blue-600 select-none" onClick={() => { setSortBy("odds_ratio"); setSortDesc(sortBy === "odds_ratio" ? !sortDesc : true); }}>
+                      <span title="Odds ratio (interaction enrichment)" className="cursor-help border-b border-dotted border-slate-400 font-normal"><em>O</em><sup><em>f</em></sup></span>
+                      {sortBy === "odds_ratio" ? (sortDesc ? "↓" : "↑") : ""}
+                    </th>
+                    <th className="py-1 pr-4 cursor-pointer hover:text-blue-600 select-none" onClick={() => { setSortBy("fdr"); setSortDesc(sortBy === "fdr" ? !sortDesc : false); }}>
+                      FDR {sortBy === "fdr" ? (sortDesc ? "↓" : "↑") : ""}
+                    </th>
+                    <th className="py-1 pr-4 cursor-pointer hover:text-blue-600 select-none" onClick={() => { setSortBy("distance"); setSortDesc(sortBy === "distance" ? !sortDesc : true); }}>
+                      Distance {sortBy === "distance" ? (sortDesc ? "↓" : "↑") : ""}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {partners.map(row => {
+                  {sortedPartners.map(row => {
                     const dispName = formatGeneName(row.partner, row.type);
                     const typeDisp = combinedLabel(row.type);
                     const checked = selectedPartners.has(row.partner);
@@ -1075,7 +1152,7 @@ function ScatterPlot({
               <line x1={0} x2={innerW} y1={0} y2={0} stroke="#eee" />
             </g>
           ))}
-          <text transform={`translate(${-44},${innerH/2}) rotate(-90)`} className="axis-label">
+          <text transform={`translate(${-44},${innerH / 2}) rotate(-90)`} className="axis-label">
             Odds ratio
           </text>
 
@@ -1088,7 +1165,7 @@ function ScatterPlot({
                 return (
                   <>
                     <line x1={xScale(midAbs)} y1={0} x2={xScale(midAbs)} y2={innerH} stroke="#444" strokeDasharray="3 3" />
-                    <polygon points={`${xScale(midAbs)-6},${innerH+10} ${xScale(midAbs)+6},${innerH+10} ${xScale(midAbs)},${innerH+2}`} fill="#000" />
+                    <polygon points={`${xScale(midAbs) - 6},${innerH + 10} ${xScale(midAbs) + 6},${innerH + 10} ${xScale(midAbs)},${innerH + 2}`} fill="#000" />
                     <text x={xScale(midAbs)} y={-2} textAnchor="middle" style={{ fontStyle: disp.italic ? "italic" : "normal" }}>
                       {disp.text} ({focalChimeraTotal})
                     </text>
@@ -1099,7 +1176,7 @@ function ScatterPlot({
           )}
 
           {/* points — draw by counts WITHOUT mutating original partners */}
-          {[...partners].sort((a,b) => b.counts - a.counts).map((p, idx) => {
+          {[...partners].sort((a, b) => b.counts - a.counts).map((p, idx) => {
             // RIL-seq teal fill applies to ALL features of the partner gene (CDS/5'/3')
             const partnerBase = baseGene(p.partner).toLowerCase();
             const rilHit = rilEnabled && rilPairsLower.has(keyForPair(focalBase, partnerBase));

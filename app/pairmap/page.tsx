@@ -57,16 +57,33 @@ function parseAnnoCSV(csv: string): Annotation[] {
     }));
 }
 function parseContactsText(txt: string): Array<[number, number]> {
-  const lines = txt.split(/\r?\n/).filter(Boolean);
+  // Quick pre-allocation approach for speed since BED files can be millions of lines
+  let pos = 0;
   const rows: Array<[number, number]> = [];
-  const body = lines.filter(l => !/^track|^browser/i.test(l));
-  for (const line of body) {
-    const parts = line.split(/\s+|,/).filter(Boolean);
-    if (parts.length >= 3 && !isNaN(Number(parts[1])) && !isNaN(Number(parts[2]))) {
-      rows.push([Number(parts[1]), Number(parts[2])]);
-    } else if (parts.length >= 2 && !isNaN(Number(parts[0])) && !isNaN(Number(parts[1]))) {
-      rows.push([Number(parts[0]), Number(parts[1])]);
+
+  while (pos < txt.length) {
+    let nextNewline = txt.indexOf('\n', pos);
+    if (nextNewline === -1) nextNewline = txt.length;
+
+    // Check if line is long enough to have coords
+    if (nextNewline - pos > 5) {
+      // slice out line without trailing \r
+      let endIdx = nextNewline;
+      if (txt[endIdx - 1] === '\r') endIdx--;
+
+      const line = txt.slice(pos, endIdx);
+      if (line[0] !== 't' && line[0] !== 'b' && line[0] !== 'T' && line[0] !== 'B') {
+        const parts = line.split(/[\s,]+/);
+        if (parts.length >= 3) {
+          const v1 = Number(parts[1]), v2 = Number(parts[2]);
+          if (!isNaN(v1) && !isNaN(v2)) rows.push([v1, v2]);
+        } else if (parts.length >= 2) {
+          const v1 = Number(parts[0]), v2 = Number(parts[1]);
+          if (!isNaN(v1) && !isNaN(v2)) rows.push([v1, v2]);
+        }
+      }
     }
+    pos = nextNewline + 1;
   }
   return rows;
 }
@@ -131,11 +148,29 @@ export default function PairMapPage() {
     .map((label) => ({ label, key: cf(label), ann: annoByName.get(cf(label)) }))
     .filter((d) => d.ann) as { label: string; key: string; ann: Annotation }[];
 
-  async function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function onAnnoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    const txt = await f.text();
-    setAnnotations(parseAnnoCSV(txt));
-    setLoadedAnnoName(f.name);
+    setLoadedAnnoName(f.name + " (loading...)");
+    Papa.parse<any>(f, {
+      header: true,
+      dynamicTyping: true,
+      skipEmptyLines: true,
+      worker: true,
+      complete: (results) => {
+        const parsed = (results.data as any[])
+          .filter((r) => r.gene_name && (r.start != null) && (r.end != null))
+          .map((r) => ({
+            gene_name: String(r.gene_name).trim(),
+            start: Number(r.start),
+            end: Number(r.end),
+            feature_type: r.feature_type,
+            strand: r.strand,
+            chromosome: r.chromosome,
+          }));
+        setAnnotations(parsed);
+        setLoadedAnnoName(f.name);
+      }
+    });
   }
   async function onContactsFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
@@ -234,7 +269,7 @@ export default function PairMapPage() {
         <div>
           <div className="text-sm text-slate-700 mb-1">Primary RNA (Y-axis, case-insensitive)</div>
           <input
-            className="border rounded px-3 py-2 w-[260px]"
+            className="border rounded px-3 py-2 w-full md:w-[260px]"
             value={primaryRNA}
             onChange={(e) => setPrimaryRNA(e.target.value)}
           />
@@ -242,7 +277,7 @@ export default function PairMapPage() {
         <div>
           <div className="text-sm text-slate-700 mb-1">Secondary RNAs (comma/space, case-insensitive)</div>
           <input
-            className="border rounded px-3 py-2 w-[420px]"
+            className="border rounded px-3 py-2 w-full md:w-[420px]"
             value={secondaryList}
             onChange={(e) => setSecondaryList(e.target.value)}
           />
@@ -251,26 +286,26 @@ export default function PairMapPage() {
         <div className="flex items-center gap-2">
           <label className="text-sm text-slate-700 w-20">Flank Y</label>
           <input type="range" min={0} max={1000} step={10} value={flankY}
-                 onChange={(e)=>setFlankY(Number(e.target.value))}/>
+            onChange={(e) => setFlankY(Number(e.target.value))} />
           <span className="text-xs text-slate-600 w-14 text-right">{flankY} nt</span>
         </div>
         <div className="flex items-center gap-2">
           <label className="text-sm text-slate-700 w-20">Flank X</label>
           <input type="range" min={0} max={1000} step={10} value={flankX}
-                 onChange={(e)=>setFlankX(Number(e.target.value))}/>
+            onChange={(e) => setFlankX(Number(e.target.value))} />
           <span className="text-xs text-slate-600 w-14 text-right">{flankX} nt</span>
         </div>
 
         <div className="flex items-center gap-2">
           <label className="text-sm text-slate-700 w-20">Bin size</label>
           <input type="range" min={5} max={50} step={5} value={binSize}
-                 onChange={(e)=>setBinSize(Number(e.target.value))}/>
+            onChange={(e) => setBinSize(Number(e.target.value))} />
           <span className="text-xs text-slate-600 w-20 text-right">{binSize} nt/bin</span>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-700 w-20">Vmax</label>
+          <label className="text-sm text-slate-700 w-20" title="Maximum value for the color scale" style={{ cursor: 'help', borderBottom: '1px dotted #94a3b8' }}>Vmax</label>
           <input type="range" min={1} max={50} step={1} value={vmax}
-                 onChange={(e)=>setVmax(Number(e.target.value))}/>
+            onChange={(e) => setVmax(Number(e.target.value))} />
           <span className="text-xs text-slate-600 w-10 text-right">{vmax}</span>
         </div>
 
@@ -301,7 +336,7 @@ export default function PairMapPage() {
                 <option value="preset-sa">Anno_SA.csv</option>
                 <option value="preset-bs">Anno_BS.csv</option>
               </select>
-              <input type="file" accept=".csv" onChange={onAnnoFile}/>
+              <input type="file" accept=".csv" onChange={onAnnoFile} />
             </div>
             <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(demo loaded)"}</div>
           </label>
@@ -319,7 +354,7 @@ export default function PairMapPage() {
                   <option key={p.url} value={p.url}>{p.label}</option>
                 ))}
               </select>
-              <input type="file" accept=".bed,.csv" onChange={onContactsFile}/>
+              <input type="file" accept=".bed,.csv" onChange={onContactsFile} />
             </div>
             <div className="text-xs text-slate-500 mt-1">{loadedContactsName || "(demo loaded)"}</div>
           </label>

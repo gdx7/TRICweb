@@ -82,10 +82,20 @@ export default function HelpPage() {
               Each chimeric read corresponds to one ligation event between two RNA fragments that were
               nearby in the cell. Aggregating millions of such events resolves:
             </p>
+            <ul className="list-disc pl-6 mb-4">
+              <li><strong>RNA structures</strong> (Hi‑C–like self‑contact maps, identifying functional domains, insulators, and structural hot-spots).</li>
+              <li><strong>Regulatory networks</strong> (identifying highly connected sRNA–mRNA pairs, regulatory sponges, and trans-acting hubs).</li>
+              <li><strong>System‑level patterns</strong> (uncovering modular interactomes, extensive mRNA-mRNA contacts, and condensate‑like organization, driven largely by non-ribosomal transcripts).</li>
+            </ul>
+
+            <h3 className="text-xl font-semibold mt-6 mb-2">Biological Insights</h3>
+            <p className="mb-4">
+              By circumventing biases associated with probe-based or UV-crosslinking strategies, TRIC-seq provides an unbiased look into the spatial orchestration of the transcriptome. Key findings unlocked by TRIC-seq include:
+            </p>
             <ul className="list-disc pl-6">
-              <li><strong>RNA structures</strong> (Hi‑C–like self‑contact maps).</li>
-              <li><strong>Regulatory networks</strong> (sRNA–mRNA pairs, sponges, hubs).</li>
-              <li><strong>System‑level patterns</strong> (modular interactomes and condensate‑like organization).</li>
+              <li><strong>Pervasive mRNA-mRNA architecture:</strong> Transcripts don't act alone; they frequently overlap geographically, participating in interconnected communities and operon-spanning regulatory cross-talk.</li>
+              <li><strong>Target discovery:</strong> Novel trans-acting RNA-RNA interactions can be discovered systematically by mapping robustly enriched intermolecular loops (significant Odd Ratios).</li>
+              <li><strong>Tertiary folds in vivo:</strong> Long-range intramolecular contacts pinpoint 5′UTR/3′UTR interactions that gate functional expression.</li>
             </ul>
 
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">

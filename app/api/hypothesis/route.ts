@@ -20,10 +20,12 @@ Here is a list of its top interacting partners along with their feature types, i
 
 ${partnersInfo}
 
-Based ONLY on the identities and feature types of these interacting RNAs, formulate a strong, specific biological hypothesis regarding the function, regulatory mechanism, or cellular role of "${focal}".
-For example, if it frequently interacts with mRNAs of specific pathways (e.g., ABC transporters, metabolism), mention that. If it interacts heavily with tRNAs or rRNAs, suggest structural or housekeeping roles.
+Based ONLY on the identities and feature types of these interacting RNAs, formulate a strong, specific biological hypothesis regarding the exact function, regulatory mechanism, and cellular role of "${focal}".
+Do not just give a generic answer like "it likely functions as an sRNA that modulates mRNA". Instead, carefully look at the names of the specific target genes provided in the list (if they are known mRNAs/CDS like ompA, luxS, etc.). Deduce their known biological functions and pathways.
+Then, postulate precisely what physiological process "${focal}" is regulating based on the shared pathways of those specific targets.
+For example, if it frequently interacts with mRNAs of specific pathways (e.g., ABC transporters, metabolism, virulence), state exactly what those pathways are based on the gene names.
 
-Keep your response extremely concise, scientific, and no longer than two short paragraphs. Do not mention that you are an AI or give generic warnings.`;
+Keep your response extremely concise, highly specific to the provided gene names, scientific, and no longer than two short paragraphs. Do not mention that you are an AI or give generic warnings.`;
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 

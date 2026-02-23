@@ -993,14 +993,6 @@ export default function Page() {
                 <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
                   Export table CSV
                 </button>
-                <button
-                  className={`border rounded px-2 py-1 text-xs ${isGenerating ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-50 dark:hover:bg-slate-800"}`}
-                  onClick={generateHypothesis}
-                  disabled={isGenerating || partners.length === 0}
-                  title="Uses Gemini AI to generate a biological hypothesis based on the current top interaction partners"
-                >
-                  {isGenerating ? "Generating..." : "Generate AI Hypothesis"}
-                </button>
               </div>
             </div>
 
@@ -1097,12 +1089,22 @@ export default function Page() {
                 </tbody>
               </table>
             </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                className={`border rounded px-3 py-1.5 text-sm font-medium transition-colors ${isGenerating ? "opacity-50 cursor-not-allowed bg-gray-100 dark:bg-slate-800" : "bg-white hover:bg-blue-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800"}`}
+                onClick={generateHypothesis}
+                disabled={isGenerating || partners.length === 0}
+                title="Uses Gemini AI to generate a biological hypothesis based on the current top interaction partners"
+              >
+                {isGenerating ? "Generating..." : "✨ Generate AI Hypothesis"}
+              </button>
+            </div>
 
             {aiHypothesis && (
               <div className="mt-4 p-4 border rounded-lg shadow-sm bg-blue-50/50 dark:bg-slate-800/50 text-sm text-gray-800 dark:text-gray-200 animate-in fade-in slide-in-from-top-2">
                 <div className="font-semibold mb-3 flex items-center justify-between">
                   <span className="text-blue-700 dark:text-blue-400 text-base">✨ AI Hypothesis Generator</span>
-                  <button onClick={() => setAiHypothesis(null)} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors">Dismiss</button>
+                  <button onClick={() => setAiHypothesis(null)} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors bg-white dark:bg-slate-900 border rounded px-2 py-1">Dismiss</button>
                 </div>
                 <div className="whitespace-pre-wrap leading-relaxed">
                   {aiHypothesis}

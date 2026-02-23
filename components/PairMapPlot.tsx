@@ -85,7 +85,7 @@ const PairMapPlot = React.memo(function PairMapPlot({
 
     return (
         <>
-            <div className="rounded-lg border bg-white overflow-x-auto">
+            <div className="rounded-lg border bg-white dark:bg-slate-900 overflow-x-auto">
                 <svg id="pairmap-svg" width={W} height={H} style={{ display: "block" }}>
                     <defs>
                         <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:11px}`}</style>

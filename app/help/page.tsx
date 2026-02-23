@@ -19,7 +19,7 @@ export default function HelpPage() {
           these datasets without delay.
         </p>
 
-        <p className="text-slate-700">
+        <p className="text-slate-700 dark:text-slate-300">
           A quick guide to TRIC-seq and how to explore RNA–RNA interactions,
           structures, and regulons using the tools in this site. For method details,
           see the preprint&nbsp;
@@ -37,7 +37,7 @@ export default function HelpPage() {
       {/* Mobile TOC */}
       <nav
         aria-label="On this page"
-        className="lg:hidden mb-8 bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm space-x-1"
+        className="lg:hidden mb-8 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 text-sm space-x-1"
       >
         <strong>On this page:</strong>{" "}
         <a className="hover:underline" href="#overview">Overview</a> ·{" "}
@@ -53,7 +53,7 @@ export default function HelpPage() {
         <aside className="col-span-3 hidden lg:block">
           <nav
             aria-label="On this page"
-            className="sticky top-24 bg-white border border-slate-200 rounded-lg p-4 text-sm"
+            className="sticky top-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-4 text-sm"
           >
             <div className="font-semibold mb-2">On this page</div>
             <ul className="space-y-2">
@@ -98,7 +98,7 @@ export default function HelpPage() {
               <li><strong>Tertiary folds in vivo:</strong> Long-range intramolecular contacts pinpoint 5′UTR/3′UTR interactions that gate functional expression.</li>
             </ul>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
               <strong>Reference:</strong>{" "}
               <a
                 href="https://doi.org/10.1101/2025.09.11.675593"
@@ -174,7 +174,7 @@ export default function HelpPage() {
               </div>
             </div>
 
-            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-slate-800">
+            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-slate-800 dark:text-slate-200">
               <strong>Recommended starting thresholds (E. coli, trans):</strong>{" "}
               <span><em>O</em><sup>f</sup></span> ≥ 10 and{" "}
               <span><em>i</em><sub>o</sub></span> ≥ 5. Loosen to explore; tighten for high‑confidence sets.
@@ -182,7 +182,7 @@ export default function HelpPage() {
               <span><em>O</em><sup>f</sup></span>/FDR over raw counts.
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+            <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 space-y-1">
               <strong>From the preprint—practical reading tips:</strong>
               <ul className="list-disc pl-6">
                 <li>
@@ -201,7 +201,7 @@ export default function HelpPage() {
               </ul>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
               <strong>Cite this resource:</strong> please cite the TRIC‑seq preprint{" "}
               <a
                 href="https://doi.org/10.1101/2025.09.11.675593"
@@ -240,13 +240,13 @@ export default function HelpPage() {
               </li>
             </ol>
 
-            <p className="bg-slate-50 border border-slate-200 rounded-md p-3">
+            <p className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md p-3">
               <strong>Tip:</strong> Sorting by{" "}
               <span><em>O</em><sup>f</sup></span> surfaces the most specific targets first. Use the
               highlight box to track a short list of hypotheses while you refocus on different RNAs.
             </p>
 
-            <div className="mt-3 overflow-auto rounded border border-slate-200">
+            <div className="mt-3 overflow-auto rounded border border-slate-200 dark:border-slate-700">
               <img
                 src="/GlobalHelp.png"
                 alt="How to use globalMAP"
@@ -302,7 +302,7 @@ export default function HelpPage() {
               </li>
             </ol>
 
-            <div className="mt-3 overflow-auto rounded border border-slate-200">
+            <div className="mt-3 overflow-auto rounded border border-slate-200 dark:border-slate-700">
               <img
                 src="/PairHelp.png"
                 alt="How to use pairMAP"
@@ -329,14 +329,14 @@ export default function HelpPage() {
               </li>
             </ol>
 
-            <p className="bg-slate-50 border border-slate-200 rounded-md p-3">
+            <p className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md p-3">
               <strong>Note:</strong> foldMAP summarizes a population‑average contact map; multiple
               conformations can overlay into the observed pattern. Use the export buttons to save the
               contact map and long‑range profile (SVG/CSV).
             </p>
           </section>
 
-          <footer className="pt-6 border-t border-slate-200 text-slate-600">
+          <footer className="pt-6 border-t border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400">
             <p>
               Need more help? Open an issue on{" "}
               <a

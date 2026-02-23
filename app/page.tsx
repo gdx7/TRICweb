@@ -56,7 +56,7 @@ export default function Home() {
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">TRIC-seq</h1>
         </div>
 
-        <p className="mt-4 text-lg text-slate-600 max-w-3xl">
+        <p className="mt-4 text-lg text-slate-600 dark:text-slate-400 max-w-3xl">
           Explore global RNA–RNA interactions and structures in bacteria
         </p>
 
@@ -75,12 +75,12 @@ function ToolCard({ title, desc, href }: { title: string; desc: string; href: st
   return (
     <Link
       href={href}
-      className="group flex flex-col justify-between rounded-2xl border bg-white/80 backdrop-blur shadow-sm hover:shadow-md transition
+      className="group flex flex-col justify-between rounded-2xl border bg-white dark:bg-slate-900/80 backdrop-blur shadow-sm hover:shadow-md transition
                  p-6 h-full ring-1 ring-slate-200 hover:ring-slate-300 focus-visible:ring-2 focus-visible:ring-slate-400 focus:outline-none"
     >
       <div>
         <div className="text-xl font-semibold">{title}</div>
-        <p className="mt-2 text-slate-600 text-sm">{desc}</p>
+        <p className="mt-2 text-slate-600 dark:text-slate-400 text-sm">{desc}</p>
       </div>
       <div className="mt-6 inline-flex w-fit items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 group-focus-visible:ring-2 group-focus-visible:ring-slate-400 group-focus-visible:ring-offset-2">
         Open <span className="transition-transform group-hover:translate-x-1">→</span>

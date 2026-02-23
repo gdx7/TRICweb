@@ -3,6 +3,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
+import { exportPNG } from "@/lib/shared";
 
 type FeatureType =
   | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
@@ -76,7 +77,7 @@ function FilePickerButton({
     <>
       <button
         type="button"
-        className="inline-flex h-8 items-center rounded border bg-white px-3 text-sm hover:bg-slate-50"
+        className="inline-flex h-8 items-center rounded border bg-white dark:bg-slate-900 px-3 text-sm hover:bg-slate-50 dark:bg-slate-800"
         onClick={() => {
           if (ref.current) {
             // Allow selecting the same file(s) again
@@ -152,9 +153,52 @@ function parseInteractionText(text: string): Interaction[] {
 async function parseInteractionFiles(files: FileList | null): Promise<Interaction[]> {
   if (!files || files.length === 0) return [];
   const all: Interaction[] = [];
+
   for (const f of Array.from(files)) {
-    const text = await f.text();
-    all.push(...parseInteractionText(text));
+    const stream = f.stream();
+    const reader = stream.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      let nextNewline = buffer.indexOf('\n');
+
+      while (nextNewline !== -1) {
+        let line = buffer.slice(0, nextNewline).trim();
+        buffer = buffer.slice(nextNewline + 1);
+
+        if (line.length > 5 && line[0] !== 't' && line[0] !== 'b' && line[0] !== 'T' && line[0] !== 'B') {
+          const t = line.split(/[\t,\s]+/);
+          if (t.length >= 3) {
+            const v1 = Number(t[1]), v2 = Number(t[2]);
+            if (!isNaN(v1) && !isNaN(v2)) all.push({ c1: v1, c2: v2 });
+          } else if (t.length >= 2) {
+            const v1 = Number(t[0]), v2 = Number(t[1]);
+            if (!isNaN(v1) && !isNaN(v2)) all.push({ c1: v1, c2: v2 });
+          }
+        }
+        nextNewline = buffer.indexOf('\n');
+      }
+    }
+
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      let line = buffer.trim();
+      if (line.length > 5 && line[0] !== 't' && line[0] !== 'b' && line[0] !== 'T' && line[0] !== 'B') {
+        const t = line.split(/[\t,\s]+/);
+        if (t.length >= 3) {
+          const v1 = Number(t[1]), v2 = Number(t[2]);
+          if (!isNaN(v1) && !isNaN(v2)) all.push({ c1: v1, c2: v2 });
+        } else if (t.length >= 2) {
+          const v1 = Number(t[0]), v2 = Number(t[1]);
+          if (!isNaN(v1) && !isNaN(v2)) all.push({ c1: v1, c2: v2 });
+        }
+      }
+    }
   }
   return all;
 }
@@ -254,6 +298,7 @@ export default function FoldMapPage() {
   const [bin, setBin] = useState(20);   // slightly larger bin speeds rendering
   const [flank, setFlank] = useState(200);
   const [norm, setNorm] = useState<"raw" | "ice">("raw"); // raw first → instant
+  const [vmax, setVmax] = useState(10);
 
   const [profileWin, setProfileWin] = useState(3);
   const [profileMinDist, setProfileMinDist] = useState(3);
@@ -381,9 +426,8 @@ export default function FoldMapPage() {
     const cw = W / matBundle.nBins, ch = H / matBundle.nBins;
 
     const vals = (mat as number[][]).flat().filter((v) => v > 0);
-    const vmax = vals.length ? percentile(vals, 95) : 1;
     const color = (v: number) => {
-      const t = Math.min(1, v / (vmax || 1));
+      const t = Math.min(1, v / Math.max(1, vmax));
       const r = 255, g = Math.round(255 * (1 - t)), b = Math.round(255 * (1 - t));
       return `rgb(${r},${g},${b})`;
     };
@@ -410,7 +454,7 @@ export default function FoldMapPage() {
     `;
 
     const disp = formatGeneName(geneRow.gene_name, geneRow.feature_type);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+    const svg = `<svg id="foldmap-matrix-export" xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
       <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>
       <text x="${x0}" y="${y0 - 10}" font-family="ui-sans-serif" font-size="12"${disp.italic ? ' font-style="italic"' : ""}>${disp.text}</text>
       <text x="${x0 + 180}" y="${y0 - 10}" font-family="ui-sans-serif" font-size="12">— ${(matBundle as any).ice ? "ICE" : "RAW"} (bin ${matBundle.bin} nt, flank ${flank} nt)</text>
@@ -420,6 +464,11 @@ export default function FoldMapPage() {
       <text transform="translate(16,${y0 + H / 2}) rotate(-90)" font-size="11" fill="#6b7280">5′ → 3′ (bins)</text>
     </svg>`;
     downloadText(`${disp.text}_foldMAP_${(matBundle as any).ice ? "ICE" : "RAW"}.svg`, svg);
+  }
+
+  function exportMatrixPNG() {
+    if (!geneRow || !matBundle) return;
+    exportPNG("foldmap-svg-dom", `${formatGeneName(geneRow.gene_name, geneRow.feature_type).text}_foldMAP_${norm}`);
   }
 
   function exportProfileSVG() {
@@ -453,7 +502,7 @@ export default function FoldMapPage() {
       <line x1="${xScale(geneEndPos)}" y1="${padT}" x2="${xScale(geneEndPos)}" y2="${padT + innerH}" stroke="#111827" stroke-width="1"/>
     `;
 
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+    const svg = `<svg id="foldmap-profile-export" xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
       <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>
       <text x="${padL}" y="${padT - 10}" font-family="ui-sans-serif" font-size="12"${disp.italic ? ' font-style="italic"' : ""}>Long-range (≥ 5 kb) interaction profile — ${disp.text}</text>
       ${bars}
@@ -463,6 +512,11 @@ export default function FoldMapPage() {
       <text transform="translate(18,${padT + innerH / 2}) rotate(-90)" font-size="11" fill="#6b7280">Smoothed ligation events</text>
     </svg>`;
     downloadText(`${disp.text}_longrange_profile.svg`, svg);
+  }
+
+  function exportProfilePNG() {
+    if (!geneRow || !longProfile) return;
+    exportPNG("foldmap-profile-dom", `${formatGeneName(geneRow.gene_name, geneRow.feature_type).text}_longrange_profile`);
   }
 
   function exportPeaksCSV() {
@@ -591,9 +645,18 @@ export default function FoldMapPage() {
               </select>
             </div>
 
+            <label className="text-xs text-gray-600 flex items-center gap-2">
+              <span title="Maximum value for the color scale" className="cursor-help border-b border-dotted border-slate-400">Vmax:</span>
+              <input type="range" min={1} max={50} step={1} value={vmax} onChange={(e) => setVmax(Number(e.target.value))} className="flex-1" />
+              <span className="w-6 text-right">{vmax}</span>
+            </label>
+
             <div className="flex gap-2 pt-2">
               <button className="border rounded px-2 py-1 text-xs h-8 disabled:opacity-50" disabled={!geneRow || !matBundle} onClick={exportMatrixSVG}>
                 Export map SVG
+              </button>
+              <button className="border rounded px-2 py-1 text-xs h-8 disabled:opacity-50" disabled={!geneRow || !matBundle} onClick={exportMatrixPNG}>
+                Export map PNG
               </button>
             </div>
           </section>
@@ -624,6 +687,9 @@ export default function FoldMapPage() {
               <button className="border rounded px-2 py-1 text-xs h-8 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportProfileSVG}>
                 Export SVG
               </button>
+              <button className="border rounded px-2 py-1 text-xs h-8 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportProfilePNG}>
+                Export PNG
+              </button>
               <button className="border rounded px-2 py-1 text-xs h-8 disabled:opacity-50" disabled={!geneRow || !longProfile} onClick={exportPeaksCSV}>
                 Export CSV
               </button>
@@ -645,14 +711,13 @@ export default function FoldMapPage() {
 
             <div className="w-full overflow-auto">
               {geneRow && dispMat ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width={680} height={680} className="mx-auto block border rounded">
+                <svg id="foldmap-svg-dom" xmlns="http://www.w3.org/2000/svg" width={680} height={680} className="mx-auto block border rounded">
                   {(() => {
                     const mat = dispMat as number[][];
                     const pad = 44, x0 = pad, y0 = pad, W = 680 - pad * 2, H = 680 - pad * 2;
                     const cw = W / matBundle!.nBins, ch = H / matBundle!.nBins;
                     const vals = mat.flat().filter((v) => v > 0);
-                    const vmax = vals.length ? percentile(vals, 95) : 1;
-                    const color = (v: number) => { const t = Math.min(1, v / (vmax || 1)); const r = 255, g = Math.round(255 * (1 - t)), b = Math.round(255 * (1 - t)); return `rgb(${r},${g},${b})`; };
+                    const color = (v: number) => { const t = Math.min(1, v / Math.max(1, vmax)); const r = 255, g = Math.round(255 * (1 - t)), b = Math.round(255 * (1 - t)); return `rgb(${r},${g},${b})`; };
 
                     const cells: JSX.Element[] = [];
                     for (let i = 0; i < matBundle!.nBins; i++) for (let j = 0; j < matBundle!.nBins; j++) {
@@ -695,7 +760,7 @@ export default function FoldMapPage() {
 
             <div className="w-full overflow-auto">
               {geneRow && longProfile ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width={840} height={300} className="mx-auto block">
+                <svg id="foldmap-profile-dom" xmlns="http://www.w3.org/2000/svg" width={840} height={300} className="mx-auto block">
                   {(() => {
                     const padL = 54, padR = 18, padT = 28, padB = 44;
                     const W = 840, H = 300;

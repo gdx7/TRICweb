@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
+import { exportPNG } from "@/lib/shared";
 
 type FeatureType =
   | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
@@ -172,10 +173,60 @@ export default function PairMapPage() {
       }
     });
   }
+  async function streamParseContactsText(f: File): Promise<Array<[number, number]>> {
+    const rows: Array<[number, number]> = [];
+    const stream = f.stream();
+    const reader = stream.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      let nextNewline = buffer.indexOf('\n');
+
+      while (nextNewline !== -1) {
+        let line = buffer.slice(0, nextNewline).trim();
+        buffer = buffer.slice(nextNewline + 1);
+
+        if (line.length > 5 && line[0] !== 't' && line[0] !== 'b' && line[0] !== 'T' && line[0] !== 'B') {
+          const parts = line.split(/[\s,]+/);
+          if (parts.length >= 3) {
+            const v1 = Number(parts[1]), v2 = Number(parts[2]);
+            if (!isNaN(v1) && !isNaN(v2)) rows.push([v1, v2]);
+          } else if (parts.length >= 2) {
+            const v1 = Number(parts[0]), v2 = Number(parts[1]);
+            if (!isNaN(v1) && !isNaN(v2)) rows.push([v1, v2]);
+          }
+        }
+        nextNewline = buffer.indexOf('\n');
+      }
+    }
+
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      let line = buffer.trim();
+      if (line.length > 5 && line[0] !== 't' && line[0] !== 'b' && line[0] !== 'T' && line[0] !== 'B') {
+        const parts = line.split(/[\s,]+/);
+        if (parts.length >= 3) {
+          const v1 = Number(parts[1]), v2 = Number(parts[2]);
+          if (!isNaN(v1) && !isNaN(v2)) rows.push([v1, v2]);
+        } else if (parts.length >= 2) {
+          const v1 = Number(parts[0]), v2 = Number(parts[1]);
+          if (!isNaN(v1) && !isNaN(v2)) rows.push([v1, v2]);
+        }
+      }
+    }
+    return rows;
+  }
+
   async function onContactsFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    const txt = await f.text();
-    setContacts(parseContactsText(txt));
+    setLoadedContactsName(f.name + " (loading...)");
+    const parsed = await streamParseContactsText(f);
+    setContacts(parsed);
     setLoadedContactsName(f.name);
   }
 
@@ -256,18 +307,26 @@ export default function PairMapPage() {
     <div className="mx-auto max-w-[1500px] p-4">
       <div className="flex items-center justify-between mb-3">
         <h1 className="text-xl font-semibold">pairMAP</h1>
-        <button
-          onClick={() => exportSVG("pairmap-svg", "pairMAP")}
-          className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
-        >
-          Export SVG
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => exportSVG("pairmap-svg", "pairMAP")}
+            className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
+          >
+            Export SVG
+          </button>
+          <button
+            onClick={() => exportPNG("pairmap-svg", "pairMAP")}
+            className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
+          >
+            Export PNG
+          </button>
+        </div>
       </div>
 
       {/* Inputs */}
       <div className="flex flex-wrap gap-6 items-end mb-4">
         <div>
-          <div className="text-sm text-slate-700 mb-1">Primary RNA (Y-axis, case-insensitive)</div>
+          <div className="text-sm text-slate-700 dark:text-slate-300 mb-1">Primary RNA (Y-axis, case-insensitive)</div>
           <input
             className="border rounded px-3 py-2 w-full md:w-[260px]"
             value={primaryRNA}
@@ -275,7 +334,7 @@ export default function PairMapPage() {
           />
         </div>
         <div>
-          <div className="text-sm text-slate-700 mb-1">Secondary RNAs (comma/space, case-insensitive)</div>
+          <div className="text-sm text-slate-700 dark:text-slate-300 mb-1">Secondary RNAs (comma/space, case-insensitive)</div>
           <input
             className="border rounded px-3 py-2 w-full md:w-[420px]"
             value={secondaryList}
@@ -284,35 +343,35 @@ export default function PairMapPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-700 w-20">Flank Y</label>
+          <label className="text-sm text-slate-700 dark:text-slate-300 w-20">Flank Y</label>
           <input type="range" min={0} max={1000} step={10} value={flankY}
             onChange={(e) => setFlankY(Number(e.target.value))} />
-          <span className="text-xs text-slate-600 w-14 text-right">{flankY} nt</span>
+          <span className="text-xs text-slate-600 dark:text-slate-400 w-14 text-right">{flankY} nt</span>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-700 w-20">Flank X</label>
+          <label className="text-sm text-slate-700 dark:text-slate-300 w-20">Flank X</label>
           <input type="range" min={0} max={1000} step={10} value={flankX}
             onChange={(e) => setFlankX(Number(e.target.value))} />
-          <span className="text-xs text-slate-600 w-14 text-right">{flankX} nt</span>
+          <span className="text-xs text-slate-600 dark:text-slate-400 w-14 text-right">{flankX} nt</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-700 w-20">Bin size</label>
+          <label className="text-sm text-slate-700 dark:text-slate-300 w-20">Bin size</label>
           <input type="range" min={5} max={50} step={5} value={binSize}
             onChange={(e) => setBinSize(Number(e.target.value))} />
-          <span className="text-xs text-slate-600 w-20 text-right">{binSize} nt/bin</span>
+          <span className="text-xs text-slate-600 dark:text-slate-400 w-20 text-right">{binSize} nt/bin</span>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-700 w-20" title="Maximum value for the color scale" style={{ cursor: 'help', borderBottom: '1px dotted #94a3b8' }}>Vmax</label>
+          <label className="text-sm text-slate-700 dark:text-slate-300 w-20" title="Maximum value for the color scale" style={{ cursor: 'help', borderBottom: '1px dotted #94a3b8' }}>Vmax</label>
           <input type="range" min={1} max={50} step={1} value={vmax}
             onChange={(e) => setVmax(Number(e.target.value))} />
-          <span className="text-xs text-slate-600 w-10 text-right">{vmax}</span>
+          <span className="text-xs text-slate-600 dark:text-slate-400 w-10 text-right">{vmax}</span>
         </div>
 
         <div className="flex-1" />
         <div className="flex gap-6 items-center">
           <label className="text-sm">
-            <div className="text-slate-700 mb-1">Annotations CSV</div>
+            <div className="text-slate-700 dark:text-slate-300 mb-1">Annotations CSV</div>
             <div className="flex items-center gap-2">
               <select
                 className="border rounded px-2 py-1 text-xs"
@@ -338,11 +397,11 @@ export default function PairMapPage() {
               </select>
               <input type="file" accept=".csv" onChange={onAnnoFile} />
             </div>
-            <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(demo loaded)"}</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{loadedAnnoName || "(demo loaded)"}</div>
           </label>
 
           <label className="text-sm">
-            <div className="text-slate-700 mb-1">Chimeras (.bed or .csv)</div>
+            <div className="text-slate-700 dark:text-slate-300 mb-1">Chimeras (.bed or .csv)</div>
             <div className="flex items-center gap-2">
               <select
                 className="border rounded px-2 py-1 text-xs"
@@ -356,13 +415,13 @@ export default function PairMapPage() {
               </select>
               <input type="file" accept=".bed,.csv" onChange={onContactsFile} />
             </div>
-            <div className="text-xs text-slate-500 mt-1">{loadedContactsName || "(demo loaded)"}</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{loadedContactsName || "(demo loaded)"}</div>
           </label>
         </div>
       </div>
 
       {/* Multi-panel heatmaps */}
-      <div className="rounded-lg border bg-white overflow-x-auto">
+      <div className="rounded-lg border bg-white dark:bg-slate-900 overflow-x-auto">
         <svg id="pairmap-svg" width={W} height={H} style={{ display: "block" }}>
           <defs>
             <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#334155;font-size:10px}`}</style>

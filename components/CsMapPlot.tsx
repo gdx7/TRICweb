@@ -131,10 +131,10 @@ const CsMapPlot = React.memo(function CsMapPlot({
     return (
         <>
             {/* Collapsed scatter */}
-            <div className="relative overflow-x-auto rounded-lg border bg-white">
+            <div className="relative overflow-x-auto rounded-lg border bg-white dark:bg-slate-900">
                 <button
                     onClick={() => exportSVG("csmap-scatter", "csMAP_scatter")}
-                    className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
+                    className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white dark:bg-slate-900 hover:bg-slate-50 dark:bg-slate-800"
                 >
                     Export SVG
                 </button>
@@ -201,16 +201,16 @@ const CsMapPlot = React.memo(function CsMapPlot({
                                 {item.label}
                             </span>
                         ))}
-                        <span className="ml-4 text-xs text-slate-500">Circle area ∝ counts</span>
+                        <span className="ml-4 text-xs text-slate-500 dark:text-slate-400">Circle area ∝ counts</span>
                     </div>
                 </div>
             </div>
 
             {/* Totals bar chart (log10) */}
-            <div className="relative overflow-x-auto rounded-lg border bg-white mt-6">
+            <div className="relative overflow-x-auto rounded-lg border bg-white dark:bg-slate-900 mt-6">
                 <button
                     onClick={() => exportSVG("csmap-bars", "csMAP_totals")}
-                    className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white hover:bg-slate-50"
+                    className="absolute right-3 top-3 text-xs px-2 py-1 border rounded bg-white dark:bg-slate-900 hover:bg-slate-50 dark:bg-slate-800"
                 >
                     Export SVG
                 </button>

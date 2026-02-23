@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
+import { exportPNG } from "@/lib/shared";
 
 type FeatureType =
   | "CDS"
@@ -546,6 +547,10 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
+  function downloadPNG() {
+    exportPNG("scatter-svg", `${focal || "interactome"}_interactome`);
+  }
+
   function exportPartnersCSV() {
     const header = ["Partner", "Feature", "Start", "End", "io", "Of", "FDR", "Distance"];
     const rows = partners.map(p => [
@@ -630,7 +635,7 @@ export default function Page() {
 
   return (
     <div>
-      <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
+      <header className="sticky top-0 z-10 bg-white dark:bg-slate-900/90 backdrop-blur border-b">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-3">
           <div className="text-xl font-semibold">Global interaction map</div>
           <div className="text-xs text-gray-500">Preloaded demo — load presets or your CSV in the data section.</div>
@@ -726,7 +731,7 @@ export default function Page() {
                     <button
                       key={g.label}
                       type="button"
-                      className={`px-2 py-1 rounded border ${active ? "bg-gray-200" : "bg-white"}`}
+                      className={`px-2 py-1 rounded border ${active ? "bg-gray-200" : "bg-white dark:bg-slate-900"}`}
                       onClick={() => toggleGroup(g.types)}
                     >
                       {g.label}
@@ -742,7 +747,7 @@ export default function Page() {
 
             {/* Interaction CSV — inline with preset on the right */}
             <label className="text-sm block">
-              <div className="text-slate-700 mb-1 flex items-center justify-between">
+              <div className="text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
                 <span>Interaction CSV</span>
                 <select
                   className="border rounded px-2 py-1 text-xs"
@@ -765,12 +770,12 @@ export default function Page() {
                   Choose File
                 </button>
               </div>
-              <div className="text-xs text-slate-500 mt-1">{loadedPairsName || "(using simulated pairs)"}</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{loadedPairsName || "(using simulated pairs)"}</div>
             </label>
 
             {/* Annotations CSV — inline with preset on the right */}
             <label className="text-sm block">
-              <div className="text-slate-700 mb-1 flex items-center justify-between">
+              <div className="text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
                 <span>Annotations CSV</span>
                 <select
                   className="border rounded px-2 py-1 text-xs"
@@ -805,7 +810,7 @@ export default function Page() {
                   Choose File
                 </button>
               </div>
-              <div className="text-xs text-slate-500 mt-1">{loadedAnnoName || "(using simulated annotations)"}</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{loadedAnnoName || "(using simulated annotations)"}</div>
             </label>
 
             <div className="text-[11px] text-gray-600 mt-2 space-y-1">
@@ -846,7 +851,7 @@ export default function Page() {
                 <em>random</em>
               </button>
 
-              <label className="flex items-center gap-2 text-xs px-2 py-1 rounded border bg-white">
+              <label className="flex items-center gap-2 text-xs px-2 py-1 rounded border bg-white dark:bg-slate-900">
                 <input
                   type="checkbox"
                   checked={rilEnabled}
@@ -861,6 +866,13 @@ export default function Page() {
                 title="Export current map as SVG"
               >
                 export (SVG)
+              </button>
+              <button
+                className="border rounded px-2 py-1 text-xs"
+                onClick={downloadPNG}
+                title="Export current map as PNG"
+              >
+                export (PNG)
               </button>
             </div>
 
@@ -957,7 +969,7 @@ export default function Page() {
 
             <div className="overflow-auto max-h-[500px]">
               <table className="min-w-full text-sm">
-                <thead className="sticky top-0 bg-white text-left text-gray-600">
+                <thead className="sticky top-0 bg-white dark:bg-slate-900 text-left text-gray-600">
                   <tr>
                     <th className="py-1 pr-4">✓</th>
                     <th className="py-1 pr-4">Partner</th>

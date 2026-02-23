@@ -108,9 +108,9 @@ export function parsePairsCSV(csv: string): Pair[] {
   return (data as any[])
     .filter((r) => r.ref && r.target)
     .map((r) => {
-       const rawFdr = r.p_value_FDR ?? r.fdr ?? r.FDR ?? r.fdr_adj ?? r.p_adj;
-       const fdrNum = rawFdr != null && rawFdr !== "" ? Number(rawFdr) : undefined;
-       return {
+      const rawFdr = r.p_value_FDR ?? r.fdr ?? r.FDR ?? r.fdr_adj ?? r.p_adj;
+      const fdrNum = rawFdr != null && rawFdr !== "" ? Number(rawFdr) : undefined;
+      return {
         ref: String(r.ref).trim(),
         target: String(r.target).trim(),
         counts: Number(r.counts) || 0,
@@ -174,4 +174,51 @@ export function exportSVG(svgId: string, filename: string) {
   a.download = filename.endsWith(".svg") ? filename : `${filename}.svg`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+export function exportPNG(svgId: string, filename: string) {
+  const el = document.getElementById(svgId) as SVGSVGElement | null;
+  if (!el) return;
+  const clone = el.cloneNode(true) as SVGSVGElement;
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+  style.textContent =
+    'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#1f2937;font-size:10px}.axis-label{font-size:11px}';
+  defs.appendChild(style);
+  clone.insertBefore(defs, clone.firstChild);
+  const ser = new XMLSerializer();
+  const str = ser.serializeToString(clone);
+
+  const blob = new Blob([str], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    const bbox = el.getBoundingClientRect();
+    canvas.width = bbox.width || 800;
+    canvas.height = bbox.height || 600;
+    const wAttr = el.getAttribute("width");
+    const hAttr = el.getAttribute("height");
+    if (wAttr) canvas.width = parseInt(wAttr, 10);
+    if (hAttr) canvas.height = parseInt(hAttr, 10);
+
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((pngBlob) => {
+        if (pngBlob) {
+          const pngUrl = URL.createObjectURL(pngBlob);
+          const a = document.createElement("a");
+          a.href = pngUrl;
+          a.download = filename.endsWith(".png") ? filename : `${filename}.png`;
+          a.click();
+          URL.revokeObjectURL(pngUrl);
+        }
+        URL.revokeObjectURL(url);
+      }, "image/png");
+    }
+  };
+  img.src = url;
 }

@@ -1004,18 +1004,6 @@ export default function Page() {
               </div>
             </div>
 
-            {aiHypothesis && (
-              <div className="mb-4 p-4 border rounded-lg bg-blue-50/50 dark:bg-slate-800/50 text-sm">
-                <div className="font-semibold mb-2 flex items-center gap-2">
-                  <span className="text-blue-600 dark:text-blue-400">✨ AI Hypothesis Generator</span>
-                  <button onClick={() => setAiHypothesis(null)} className="text-xs text-gray-500 hover:text-gray-700 ml-auto bg-white dark:bg-slate-900 border rounded px-2 py-0.5">Dismiss</button>
-                </div>
-                <div className="whitespace-pre-wrap leading-relaxed text-gray-800 dark:text-gray-200">
-                  {aiHypothesis}
-                </div>
-              </div>
-            )}
-
             <div className="overflow-auto max-h-[500px]">
               <table className="min-w-full text-sm">
                 <thead className="sticky top-0 bg-white dark:bg-slate-900 text-left text-gray-600">
@@ -1109,6 +1097,19 @@ export default function Page() {
                 </tbody>
               </table>
             </div>
+
+            {aiHypothesis && (
+              <div className="mt-4 p-4 border rounded-lg shadow-sm bg-blue-50/50 dark:bg-slate-800/50 text-sm text-gray-800 dark:text-gray-200 animate-in fade-in slide-in-from-top-2">
+                <div className="font-semibold mb-3 flex items-center justify-between">
+                  <span className="text-blue-700 dark:text-blue-400 text-base">✨ AI Hypothesis Generator</span>
+                  <button onClick={() => setAiHypothesis(null)} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors">Dismiss</button>
+                </div>
+                <div className="whitespace-pre-wrap leading-relaxed">
+                  {aiHypothesis}
+                </div>
+              </div>
+            )}
+
           </section>
         </div>
       </main>

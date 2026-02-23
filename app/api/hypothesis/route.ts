@@ -41,7 +41,7 @@ Keep your response extremely concise, highly specific to the provided gene names
                     }]
                 }],
                 generationConfig: {
-                    maxOutputTokens: 800,
+                    maxOutputTokens: 2048,
                     temperature: 0.7,
                 }
             })

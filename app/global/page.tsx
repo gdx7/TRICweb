@@ -171,6 +171,8 @@ export default function Page() {
   const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["tRNA"]);
   const [query, setQuery] = useState("");
   const [highlightQuery, setHighlightQuery] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [aiHypothesis, setAiHypothesis] = useState<string | null>(null);
 
   // carryover selections
   const [selectedPartners, setSelectedPartners] = useState<Set<string>>(new Set());
@@ -549,6 +551,33 @@ export default function Page() {
 
   function downloadPNG() {
     exportPNG("scatter-svg", `${focal || "interactome"}_interactome`);
+  }
+
+  async function generateHypothesis() {
+    if (!focal || partners.length === 0) return;
+    setIsGenerating(true);
+    setAiHypothesis(null);
+    try {
+      const partnersInfo = partners.slice(0, 50).map(p =>
+        `- ${p.partner} (${combinedLabel(p.type).label}): reads=${p.counts}, OR=${p.rawY.toFixed(2)}${p.fdr != null ? `, FDR=${p.fdr.toExponential(2)}` : ''}`
+      ).join("\n");
+
+      const res = await fetch("/api/hypothesis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ focal, partnersInfo })
+      });
+      const data = await res.json();
+      if (res.ok && data.hypothesis) {
+        setAiHypothesis(data.hypothesis);
+      } else {
+        setAiHypothesis(`Error: ${data.error || "Failed to generate hypothesis"}`);
+      }
+    } catch (err: any) {
+      setAiHypothesis(`Error: ${err.message}`);
+    } finally {
+      setIsGenerating(false);
+    }
   }
 
   function exportPartnersCSV() {
@@ -964,8 +993,28 @@ export default function Page() {
                 <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
                   Export table CSV
                 </button>
+                <button
+                  className={`border rounded px-2 py-1 text-xs ${isGenerating ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-50 dark:hover:bg-slate-800"}`}
+                  onClick={generateHypothesis}
+                  disabled={isGenerating || partners.length === 0}
+                  title="Uses Gemini AI to generate a biological hypothesis based on the current top interaction partners"
+                >
+                  {isGenerating ? "Generating..." : "Generate AI Hypothesis"}
+                </button>
               </div>
             </div>
+
+            {aiHypothesis && (
+              <div className="mb-4 p-4 border rounded-lg bg-blue-50/50 dark:bg-slate-800/50 text-sm">
+                <div className="font-semibold mb-2 flex items-center gap-2">
+                  <span className="text-blue-600 dark:text-blue-400">✨ AI Hypothesis Generator</span>
+                  <button onClick={() => setAiHypothesis(null)} className="text-xs text-gray-500 hover:text-gray-700 ml-auto bg-white dark:bg-slate-900 border rounded px-2 py-0.5">Dismiss</button>
+                </div>
+                <div className="whitespace-pre-wrap leading-relaxed text-gray-800 dark:text-gray-200">
+                  {aiHypothesis}
+                </div>
+              </div>
+            )}
 
             <div className="overflow-auto max-h-[500px]">
               <table className="min-w-full text-sm">

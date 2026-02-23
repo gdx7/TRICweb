@@ -558,9 +558,17 @@ export default function Page() {
     setIsGenerating(true);
     setAiHypothesis(null);
     try {
-      const partnersInfo = partners.slice(0, 50).map(p =>
+      const validPartners = partners.filter(p => p.counts >= 5 && p.rawY >= 10);
+
+      const partnersInfo = validPartners.slice(0, 50).map(p =>
         `- ${p.partner} (${combinedLabel(p.type).label}): reads=${p.counts}, OR=${p.rawY.toFixed(2)}${p.fdr != null ? `, FDR=${p.fdr.toExponential(2)}` : ''}`
       ).join("\n");
+
+      if (partnersInfo.trim() === "") {
+        setAiHypothesis("Not enough high-confidence partners (reads ≥ 5 and Odds Ratio ≥ 10) to generate a robust hypothesis.");
+        setIsGenerating(false);
+        return;
+      }
 
       const res = await fetch("/api/hypothesis", {
         method: "POST",
@@ -1089,14 +1097,14 @@ export default function Page() {
                 </tbody>
               </table>
             </div>
-            <div className="mt-3 flex justify-end">
+            <div className="mt-4 flex justify-center">
               <button
-                className={`border rounded px-3 py-1.5 text-sm font-medium transition-colors ${isGenerating ? "opacity-50 cursor-not-allowed bg-gray-100 dark:bg-slate-800" : "bg-white hover:bg-blue-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800"}`}
+                className={`border rounded px-4 py-2 text-sm font-medium transition-colors shadow-sm ${isGenerating ? "opacity-50 cursor-not-allowed bg-gray-100 dark:bg-slate-800" : "bg-white hover:bg-blue-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800"}`}
                 onClick={generateHypothesis}
                 disabled={isGenerating || partners.length === 0}
-                title="Uses Gemini AI to generate a biological hypothesis based on the current top interaction partners"
+                title="Uses Gemini AI to generate a biological hypothesis based on the current top interaction partners (requires reads ≥ 5 and OR ≥ 10)"
               >
-                {isGenerating ? "Generating..." : "✨ Generate AI Hypothesis"}
+                {isGenerating ? "Generating..." : "✨ AI Hypothesis (Beta)"}
               </button>
             </div>
 

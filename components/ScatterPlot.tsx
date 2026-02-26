@@ -61,7 +61,7 @@ const ScatterPlot = React.memo(function ScatterPlot({
 }: ScatterPlotProps) {
     const width = 900;
     const height = 520;
-    const margin = { top: 12, right: 120, bottom: 42, left: 60 };
+    const margin = { top: 32, right: 120, bottom: 42, left: 60 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
 

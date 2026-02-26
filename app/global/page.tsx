@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 import { exportPNG } from "@/lib/shared";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 type FeatureType =
   | "CDS"
@@ -570,10 +571,12 @@ export default function Page() {
         return;
       }
 
+      const focalFeatureType = geneIndex[focal]?.feature_type || "Unknown Feature";
+
       const res = await fetch("/api/hypothesis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ focal, partnersInfo })
+        body: JSON.stringify({ focal, focalFeatureType, partnersInfo })
       });
       const data = await res.json();
       if (res.ok && data.hypothesis) {
@@ -672,17 +675,25 @@ export default function Page() {
 
   return (
     <div>
-      <header className="sticky top-0 z-10 bg-white dark:bg-slate-900/90 backdrop-blur border-b">
+      <header className="sticky top-0 z-10 bg-white/90 dark:bg-slate-900/90 backdrop-blur border-b">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-3">
-          <div className="text-xl font-semibold">Global interaction map</div>
-          <div className="text-xs text-gray-500">Preloaded demo — load presets or your CSV in the data section.</div>
+          <div className="flex items-center gap-4">
+            <div className="text-xl font-bold tracking-tight">Global interaction map</div>
+            <button
+              onClick={() => (window as any).startTour?.()}
+              className="text-xs font-semibold px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-50 transition-colors"
+            >
+              Start Tour
+            </button>
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">Preloaded demo — load presets or your CSV in the data section.</div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl p-4 grid grid-cols-12 gap-4">
         {/* Controls */}
         <div className="col-span-12 lg:col-span-3 space-y-4">
-          <section className="border rounded-2xl p-4 shadow-sm">
+          <section className="tour-search border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm bg-white dark:bg-slate-900">
             <div className="font-semibold mb-2">Search</div>
             <form onSubmit={handleSearchSubmit} className="flex gap-2 mb-2">
               <input
@@ -706,11 +717,12 @@ export default function Page() {
             </div>
           </section>
 
-          <section className="border rounded-2xl p-4 shadow-sm space-y-3">
+          <section className="tour-filters border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm bg-white dark:bg-slate-900 space-y-3">
             <div className="font-semibold">Filters</div>
 
-            <label className="text-xs text-gray-600">
-              Min interactions (<span title="Raw chimeric reads (minimum required)" className="cursor-help border-b border-dotted border-slate-400"><em>i</em><sub>o</sub></span>): {minCounts}
+            <label className="text-xs text-gray-600 flex items-center gap-1.5">
+              Min interactions: {minCounts}
+              <InfoTooltip content={<>Raw chimeric reads (minimum required). Denoted by <em>i<sub>o</sub></em>.</>} />
             </label>
             <input
               type="range"
@@ -722,21 +734,23 @@ export default function Page() {
               className="w-full"
             />
 
-            <label className="text-xs text-gray-600">
-              Y cap (odds ratio <span title="Odds ratio (interaction enrichment)" className="cursor-help border-b border-dotted border-slate-400"><em>O</em><sup><em>f</em></sup></span>): {yCap}
+            <label className="text-xs text-gray-600 flex items-center gap-1.5">
+              Y cap (odds ratio): {yCap}
+              <InfoTooltip content={<>Odds ratio (interaction enrichment cap). Denoted by <em>O<sup>f</sup></em>.</>} />
             </label>
             <input
               type="range"
-              min={100}
+              min={10}
               max={5000}
-              step={100}
+              step={10}
               value={yCap}
               onChange={e => setYCap(Number(e.target.value))}
               className="w-full"
             />
 
-            <label className="text-xs text-gray-600">
-              Label threshold (<span title="Odds ratio (interaction enrichment)" className="cursor-help border-b border-dotted border-slate-400"><em>O</em><sup><em>f</em></sup></span>): {labelThreshold}
+            <label className="text-xs text-gray-600 flex items-center gap-1.5">
+              Label threshold: {labelThreshold}
+              <InfoTooltip content={<>Minimum odds ratio (<em>O<sup>f</sup></em>) required to label a target on the plot.</>} />
             </label>
             <input
               type="range"
@@ -748,7 +762,10 @@ export default function Page() {
               className="w-full"
             />
 
-            <label className="text-xs text-gray-600">Circle size scale: ×{sizeScaleFactor.toFixed(1)}</label>
+            <label className="text-xs text-gray-600 flex items-center gap-1.5">
+              Circle size scale: ×{sizeScaleFactor.toFixed(1)}
+              <InfoTooltip content="Adjust the relative visual size of all target circles on the plot." />
+            </label>
             <input
               type="range"
               min={0.1}
@@ -779,13 +796,15 @@ export default function Page() {
             </div>
           </section>
 
-          <section className="border rounded-2xl p-4 shadow-sm space-y-3">
+          <section className="tour-data border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm bg-white dark:bg-slate-900 space-y-3">
             <div className="font-semibold">Data</div>
 
             {/* Interaction CSV — inline with preset on the right */}
             <label className="text-sm block">
-              <div className="text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
-                <span>Interaction CSV</span>
+              <div className="text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5 justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span>Interaction CSV</span>
+                </div>
                 <select
                   className="border rounded px-2 py-1 text-xs"
                   defaultValue=""
@@ -813,7 +832,9 @@ export default function Page() {
             {/* Annotations CSV — inline with preset on the right */}
             <label className="text-sm block">
               <div className="text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
-                <span>Annotations CSV</span>
+                <div className="flex items-center gap-1.5">
+                  <span>Annotations CSV</span>
+                </div>
                 <select
                   className="border rounded px-2 py-1 text-xs"
                   defaultValue=""
@@ -860,7 +881,7 @@ export default function Page() {
 
         {/* Scatter + legend + table */}
         <div className="col-span-12 lg:col-span-9 space-y-4">
-          <section className="border rounded-2xl p-4 shadow-sm">
+          <section className="tour-scatter border border-slate-200 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-900 shadow-sm relative overflow-hidden flex flex-col min-h-[500px]">
             <ScatterPlot
               focal={focal}
               focalAnn={geneIndex[focal]}
@@ -878,8 +899,8 @@ export default function Page() {
               onClickPartner={(name) => setFocal(name)}
             />
 
-            {/* Toolbar BELOW the map, ABOVE the legend */}
-            <div className="mt-2 mb-2 flex flex-wrap items-center gap-2 justify-end">
+            {/* Toolbar BELOW the map, ABOVE the legend - REVERTED TO INLINE */}
+            <div className="tour-toolbar mt-2 mb-2 flex flex-wrap items-center gap-2 justify-end">
               <button
                 className="border rounded px-2 py-1 text-xs"
                 onClick={pickRandomHigh}
@@ -902,41 +923,41 @@ export default function Page() {
                 onClick={downloadSVG}
                 title="Export current map as SVG"
               >
-                export (SVG)
+                SVG
               </button>
               <button
-                className="border rounded px-2 py-1 text-xs"
+                className="border rounded px-2 py-1 text-xs mr-2"
                 onClick={downloadPNG}
                 title="Export current map as PNG"
               >
-                export (PNG)
+                PNG
               </button>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-4 items-center">
-              <span className="text-sm font-medium">Feature types</span>
-              {[
-                { key: "CDS", color: colorOf("CDS"), label: "CDS" },
-                { key: "5'UTR", color: colorOf("5'UTR"), label: "5'UTR" },
-                { key: "3'UTR", color: colorOf("3'UTR"), label: "3'UTR" },
-                { key: "sRNA/ncRNA", color: colorOf("sRNA"), label: "sRNA/ncRNA" },
-                { key: "tRNA", color: colorOf("tRNA"), label: "tRNA" },
-                { key: "rRNA/hkRNA", color: colorOf("rRNA"), label: "rRNA/hkRNA" },
-                { key: "sponge", color: colorOf("sponge"), label: "Sponge" },
-              ].map(item => (
-                <span key={item.key} className="inline-flex items-center gap-2 text-xs">
-                  <span
-                    className="inline-block w-3 h-3 rounded-full border"
-                    style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}
-                  />
-                  {item.label}
-                </span>
-              ))}
-              <span className="ml-6 text-xs text-gray-500">Circle area ∝ counts</span>
             </div>
           </section>
 
-          <section className="border rounded-2xl p-4 shadow-sm">
+          <div className="tour-legend mt-2 flex flex-wrap gap-4 items-center px-1">
+            <span className="text-sm font-medium text-slate-900 dark:text-slate-100">Feature types</span>
+            {[
+              { key: "CDS", color: colorOf("CDS"), label: "CDS" },
+              { key: "5'UTR", color: colorOf("5'UTR"), label: "5'UTR" },
+              { key: "3'UTR", color: colorOf("3'UTR"), label: "3'UTR" },
+              { key: "sRNA/ncRNA", color: colorOf("sRNA"), label: "sRNA/ncRNA" },
+              { key: "tRNA", color: colorOf("tRNA"), label: "tRNA" },
+              { key: "rRNA/hkRNA", color: colorOf("rRNA"), label: "rRNA/hkRNA" },
+              { key: "sponge", color: colorOf("sponge"), label: "Sponge" },
+            ].map(item => (
+              <span key={item.key} className="inline-flex items-center gap-2 text-xs">
+                <span
+                  className="inline-block w-3 h-3 rounded-full border"
+                  style={{ background: "#fff", borderColor: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}
+                />
+                {item.label}
+              </span>
+            ))}
+            <span className="ml-6 text-xs text-gray-500 dark:text-gray-400">Circle area ∝ counts</span>
+          </div>
+
+          <section className="tour-table border rounded-2xl p-4 shadow-sm">
             <div className="flex justify-between items-center mb-3">
               <div className="font-semibold">
                 {" "}
@@ -999,7 +1020,7 @@ export default function Page() {
                   sorted by <span className="font-semibold">{sortBy}</span> {sortDesc ? "↓" : "↑"}
                 </div>
                 <button className="border rounded px-2 py-1 text-xs" onClick={exportPartnersCSV}>
-                  Export table CSV
+                  CSV
                 </button>
               </div>
             </div>
@@ -1015,11 +1036,11 @@ export default function Page() {
                       Start {sortBy === "start" ? (sortDesc ? "↓" : "↑") : ""}
                     </th>
                     <th className="py-1 pr-4">End</th>
-                    <th className="py-1 pr-4 cursor-pointer hover:text-blue-600 select-none" onClick={() => { setSortBy("counts"); setSortDesc(sortBy === "counts" ? !sortDesc : true); }}>
+                    <th className="py-1 pr-4 tour-table-cols cursor-pointer hover:text-blue-600 select-none" onClick={() => { setSortBy("counts"); setSortDesc(sortBy === "counts" ? !sortDesc : true); }}>
                       <span title="Raw chimeric reads (minimum required)" className="cursor-help border-b border-dotted border-slate-400 font-normal"><em>i</em><sub>o</sub></span>
                       {sortBy === "counts" ? (sortDesc ? "↓" : "↑") : ""}
                     </th>
-                    <th className="py-1 pr-4 cursor-pointer hover:text-blue-600 select-none" onClick={() => { setSortBy("odds_ratio"); setSortDesc(sortBy === "odds_ratio" ? !sortDesc : true); }}>
+                    <th className="py-1 pr-4 tour-table-cols cursor-pointer hover:text-blue-600 select-none" onClick={() => { setSortBy("odds_ratio"); setSortDesc(sortBy === "odds_ratio" ? !sortDesc : true); }}>
                       <span title="Odds ratio (interaction enrichment)" className="cursor-help border-b border-dotted border-slate-400 font-normal"><em>O</em><sup><em>f</em></sup></span>
                       {sortBy === "odds_ratio" ? (sortDesc ? "↓" : "↑") : ""}
                     </th>

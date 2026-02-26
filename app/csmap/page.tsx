@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { PRESETS } from "@/lib/presets";
 import { exportPNG } from "@/lib/shared";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 type FeatureType =
   | "CDS" | "5'UTR" | "3'UTR" | "ncRNA" | "tRNA" | "rRNA" | "sRNA" | "hkRNA" | "sponge" | string;
@@ -361,7 +362,10 @@ export default function CsMapPage() {
         />
 
         <div className="flex items-center gap-2">
-          <div className="text-xs text-slate-700 dark:text-slate-300 whitespace-nowrap">Circle size ×{sizeScaleFactor.toFixed(1)}</div>
+          <div className="text-xs text-slate-700 dark:text-slate-300 whitespace-nowrap flex items-center gap-1.5">
+            Circle size ×{sizeScaleFactor.toFixed(1)}
+            <InfoTooltip content="Adjust the relative visual size of all target circles on the plot." />
+          </div>
           <input
             type="range"
             min={0.1}
@@ -376,7 +380,12 @@ export default function CsMapPage() {
 
         <div className="flex flex-col sm:flex-row gap-6">
           <label className="text-sm">
-            <div className="text-slate-700 dark:text-slate-300 mb-1">Interaction analysis CSV</div>
+            <div className="text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5 justify-between">
+              <div className="flex items-center gap-1.5">
+                <span>Interaction analysis CSV</span>
+                <InfoTooltip content="File mapping pairwise RNA interactions (e.g. counts, odds_ratio)." />
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <select
                 className="border rounded px-2 py-1 text-xs"
@@ -397,7 +406,12 @@ export default function CsMapPage() {
           </label>
 
           <label className="text-sm">
-            <div className="text-slate-700 dark:text-slate-300 mb-1">Annotations CSV</div>
+            <div className="text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5 justify-between">
+              <div className="flex items-center gap-1.5">
+                <span>Annotations CSV</span>
+                <InfoTooltip content="File describing genomic features (start, end, type) for target RNAs." />
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <select
                 className="border rounded px-2 py-1 text-xs"
@@ -440,13 +454,13 @@ export default function CsMapPage() {
               onClick={() => exportSVG("csmap-scatter", "csMAP_scatter")}
               className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-100"
             >
-              Export SVG
+              SVG
             </button>
             <button
               onClick={() => exportPNG("csmap-scatter", "csMAP_scatter")}
               className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-100"
             >
-              Export PNG
+              PNG
             </button>
           </div>
         </div>
@@ -532,13 +546,13 @@ export default function CsMapPage() {
               onClick={() => exportSVG("csmap-bars", "csMAP_totals")}
               className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-100"
             >
-              Export SVG
+              SVG
             </button>
             <button
               onClick={() => exportPNG("csmap-bars", "csMAP_totals")}
               className="text-xs px-2 py-1 border rounded bg-white hover:bg-slate-100"
             >
-              Export PNG
+              PNG
             </button>
           </div>
         </div>

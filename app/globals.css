@@ -32,3 +32,93 @@ html, body { height: 100%; }
   background: #94a3b8; /* slate-400 */
 }
 
+/* ============================================================
+   Explorer design system — glass, gradients, motion
+   ============================================================ */
+
+/* Aurora background for the unified explorer */
+.explorer-bg {
+  position: relative;
+  background:
+    radial-gradient(60rem 60rem at 8% -10%, rgba(118, 170, 215, 0.16), transparent 60%),
+    radial-gradient(50rem 50rem at 100% 0%, rgba(164, 1, 148, 0.10), transparent 55%),
+    radial-gradient(70rem 50rem at 50% 120%, rgba(247, 130, 8, 0.08), transparent 60%),
+    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+.explorer-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(60rem 50rem at 50% 0%, black, transparent 75%);
+  mask-image: radial-gradient(60rem 50rem at 50% 0%, black, transparent 75%);
+}
+
+/* Frosted glass panel */
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.18), 0 2px 6px -2px rgba(15, 23, 42, 0.08);
+}
+.glass-soft {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(10px) saturate(130%);
+  -webkit-backdrop-filter: blur(10px) saturate(130%);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+/* Animated accent shimmer for loading states */
+.shimmer {
+  background: linear-gradient(100deg, #eef2f7 30%, #ffffff 50%, #eef2f7 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Lens cross-fade */
+@keyframes lens-in {
+  0% { opacity: 0; transform: translateY(8px) scale(0.99); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.lens-in { animation: lens-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Focal pulse */
+@keyframes focal-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.15; }
+}
+.focal-pulse { animation: focal-pulse 2.6s ease-in-out infinite; }
+
+/* Chord draw-in for the genome view */
+@keyframes draw-chord {
+  from { stroke-dashoffset: var(--len, 600); opacity: 0; }
+  to { stroke-dashoffset: 0; opacity: 1; }
+}
+
+/* Row enter */
+@keyframes row-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Circos chord draw-in (paths use pathLength=1) */
+@keyframes chord-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes dot-pop {
+  from { opacity: 0; transform: scale(0.2); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+

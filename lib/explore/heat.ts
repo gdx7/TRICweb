@@ -17,7 +17,8 @@ function ramp(stops: string[], t: number) {
 const WARM = ["#ffffff", "#fde68a", "#fb923c", "#dc2626", "#7f1d1d"];
 const EMBER = ["#ffffff", "#fecaca", "#f87171", "#b91c1c", "#450a0a"];
 // Sequential light→dark ramp for encoding odds ratio on the genome chords.
-const ODDS = ["#dbeafe", "#93c5fd", "#60a5fa", "#3b82f6", "#1d4ed8", "#1e1b4b"];
+// Wide lightness span so low (faint lavender) and high (deep indigo) read clearly.
+const ODDS = ["#e0e7ff", "#a5b4fc", "#818cf8", "#5b54e0", "#3730a3", "#1e1b4b"];
 
 export const heatWarm = (t: number) => ramp(WARM, t);
 export const heatRed = (t: number) => ramp(EMBER, t);

@@ -110,8 +110,10 @@ html, body { height: 100%; }
   to { opacity: 1; transform: translateX(0); }
 }
 
-/* Circos chord draw-in (paths use pathLength=1) */
+/* Circos chord draw-in (paths use pathLength=1). The resting/inline state is
+   dashoffset:0 (fully drawn) so exported, un-animated clones still show arcs. */
 @keyframes chord-draw {
+  from { stroke-dashoffset: 1; }
   to { stroke-dashoffset: 0; }
 }
 @keyframes dot-pop {

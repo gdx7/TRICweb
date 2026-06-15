@@ -13,13 +13,14 @@ export function InteractomeLens() {
   const {
     focal, focalAnn, focalTotal, partners, genomeStart, genomeLen,
     yCap, labelThreshold, sizeScale, highlight,
-    setFocal, setActivePartner, effectiveActivePartner, pickRandom,
+    setFocal, setActivePartner, activePartner, pickRandom,
   } = useExplorer();
   const [view, setView] = useState<View>("genome");
   const [hover, setHover] = useState<PartnerRow | null>(null);
 
   const accent = pickColor(focalAnn?.feature_type);
-  const activeName = effectiveActivePartner?.partner;
+  // Only an explicitly chosen partner is emphasised — never the auto-default top one.
+  const activeName = activePartner ?? undefined;
 
   return (
     <div className="glass rounded-3xl p-4 sm:p-5">
@@ -123,10 +124,21 @@ function GenomeChords(props: ViewProps) {
 
   const focalMid = focalAnn ? Math.floor((focalAnn.start + focalAnn.end) / 2) : genomeStart;
   const [fx, fy] = ptOf(focalMid);
-  const maxOR = useMemo(() => Math.max(10, ...partners.map((p) => p.rawY)), [partners]);
-  const logMax = Math.log10(maxOR);
-  // log-scaled odds ratio → [0,1] so the colour gradient spreads across the range
-  const orT = (or: number) => Math.max(0, Math.min(1, Math.log10(Math.max(1, or)) / (logMax || 1)));
+
+  // Normalise odds ratio and reads across the ACTUAL data range (log scale) so the
+  // colour and width spread maximally — this is what makes high vs low contrast.
+  const { orT, widthT } = useMemo(() => {
+    const ors = partners.map((p) => Math.log10(Math.max(1, p.rawY)));
+    const cts = partners.map((p) => Math.log10(Math.max(1, p.counts)));
+    const oLo = ors.length ? Math.min(...ors) : 0;
+    const oHi = ors.length ? Math.max(...ors) : 1;
+    const cLo = cts.length ? Math.min(...cts) : 0;
+    const cHi = cts.length ? Math.max(...cts) : 1;
+    return {
+      orT: (or: number) => (oHi > oLo ? (Math.log10(Math.max(1, or)) - oLo) / (oHi - oLo) : 0.6),
+      widthT: (c: number) => (cHi > cLo ? (Math.log10(Math.max(1, c)) - cLo) / (cHi - cLo) : 0.5),
+    };
+  }, [partners]);
 
   const mbTicks = useMemo(() => {
     const step = 0.5e6, n = Math.floor(genomeLen / step);
@@ -191,19 +203,22 @@ function GenomeChords(props: ViewProps) {
             const [px, py] = ptOf(mid);
             const isActive = p.partner === activeName;
             const isHover = hover?.partner === p.partner;
-            const t = orT(p.rawY); // odds ratio → colour
-            const op = isHover || isActive ? 0.98 : 0.5 + t * 0.45;
+            const t = orT(p.rawY);        // odds ratio → colour
+            const wT = widthT(p.counts);  // log(reads) → width
+            const emph = isHover || isActive;
+            // low OR recedes (faint), high OR pops — keeps the plot uncluttered
+            const op = emph ? 0.98 : 0.12 + t * 0.72;
             return (
               <path
                 key={p.partner}
                 d={`M ${fx} ${fy} Q ${cx} ${cy} ${px} ${py}`}
                 fill="none"
-                stroke={isActive ? accent : oddsColor(t)}
-                strokeWidth={isHover || isActive ? 2.6 : 0.8 + t * 1.8}
+                stroke={oddsColor(t)}
+                strokeWidth={(0.6 + wT * 3.6) * (emph ? 1.5 : 1)}
                 strokeOpacity={op}
                 strokeLinecap="round"
                 pathLength={1}
-                style={{ strokeDasharray: 1, strokeDashoffset: 1, animation: `chord-draw 0.7s ease forwards`, animationDelay: `${Math.min(i * 6, 360)}ms` }}
+                style={{ strokeDasharray: 1, strokeDashoffset: 0, animation: `chord-draw 0.7s ease forwards`, animationDelay: `${Math.min(i * 6, 360)}ms` }}
               />
             );
           })}
@@ -219,19 +234,21 @@ function GenomeChords(props: ViewProps) {
             const isHi = highlight.has(p.partner);
             const isActive = p.partner === activeName;
             return (
-              <circle
-                key={p.partner}
-                cx={px} cy={py} r={r}
-                fill={isHi ? "#FDE047" : "#fff"}
-                stroke={isActive ? accent : col}
-                strokeWidth={isActive ? 3 : 2}
-                className="cursor-pointer"
-                style={{ transition: "r 120ms" }}
-                onMouseEnter={() => setHover(p)}
-                onMouseLeave={() => setHover(null)}
-                onClick={() => onClick(p.partner)}
-                onDoubleClick={() => onActivate(p.partner)}
-              />
+              <g key={p.partner}>
+                {isActive && <circle cx={px} cy={py} r={r + 3.5} fill="none" stroke="#0f172a" strokeWidth={1.5} />}
+                <circle
+                  cx={px} cy={py} r={r}
+                  fill={isHi ? "#FDE047" : "#fff"}
+                  stroke={col}
+                  strokeWidth={2}
+                  className="cursor-pointer"
+                  style={{ transition: "r 120ms" }}
+                  onMouseEnter={() => setHover(p)}
+                  onMouseLeave={() => setHover(null)}
+                  onClick={() => onClick(p.partner)}
+                  onDoubleClick={() => onActivate(p.partner)}
+                />
+              </g>
             );
           })}
         </g>
@@ -338,7 +355,8 @@ function LinearScatter(props: ViewProps) {
             const col = pickColor(p.type);
             return (
               <g key={p.partner} transform={`translate(${xS(p.x)},${yS(p.y)})`}>
-                <circle r={size(p.counts)} fill={isHi ? "#FDE047" : "#fff"} stroke={isActive ? accent : col} strokeWidth={isActive ? 3 : 2}
+                {isActive && <circle r={size(p.counts) + 3.5} fill="none" stroke="#0f172a" strokeWidth={1.5} />}
+                <circle r={size(p.counts)} fill={isHi ? "#FDE047" : "#fff"} stroke={col} strokeWidth={2}
                   className="cursor-pointer" onMouseEnter={() => setHover(p)} onMouseLeave={() => setHover(null)}
                   onClick={() => onClick(p.partner)} onDoubleClick={() => onActivate(p.partner)} />
               </g>

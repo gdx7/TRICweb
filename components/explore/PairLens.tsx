@@ -136,17 +136,17 @@ function Heatmap({ m, vmax, accent, flankX, flankY, binUsed, dispX, dispY }: any
 }
 
 function ColorBar({ vmax }: { vmax: number }) {
-  const stops = Array.from({ length: 24 }, (_, i) => i / 23);
+  const BAR_H = 200;
+  const grad = `linear-gradient(to top, ${[0, 0.2, 0.4, 0.6, 0.8, 1].map((t) => heat(t)).join(", ")})`;
   return (
-    <div className="flex shrink-0 flex-row items-center gap-2 sm:flex-col sm:items-start">
+    <div className="flex shrink-0 flex-col items-center gap-1.5 pt-1">
       <div className="text-[10px] font-medium text-slate-400">reads</div>
-      <div className="flex sm:flex-col-reverse">
-        <div className="flex h-3 w-40 overflow-hidden rounded sm:h-40 sm:w-3 sm:flex-col-reverse">
-          {stops.map((t, i) => <div key={i} className="flex-1" style={{ background: heat(t) }} />)}
+      <div className="flex items-stretch gap-1.5" style={{ height: BAR_H }}>
+        <div className="w-3 rounded-sm border border-slate-200" style={{ background: grad }} />
+        <div className="flex flex-col justify-between text-[10px] text-slate-400">
+          <span>{Math.round(vmax)}</span>
+          <span>0</span>
         </div>
-      </div>
-      <div className="flex w-40 justify-between text-[10px] text-slate-400 sm:w-auto sm:flex-col-reverse sm:items-start sm:gap-[8.6rem]">
-        <span>0</span><span>{Math.round(vmax)}</span>
       </div>
     </div>
   );

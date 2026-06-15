@@ -155,18 +155,42 @@ export function parseContactsText(txt: string): Array<[number, number]> {
 
 
 // ---------- Export helper ----------
+const EXPORT_STYLE =
+  'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#1f2937;font-size:10px}.axis-label{font-size:11px}';
+
+// Resolve the intrinsic pixel size of an SVG. Many plots use width="100%" with a
+// viewBox for responsiveness, so reading the width attribute alone yields "100%"
+// (→ parseInt 100) and produces exports padded with empty space. Prefer the
+// viewBox, then explicit numeric width/height, then the rendered bounding box.
+function svgPixelSize(el: SVGSVGElement): { w: number; h: number } {
+  const vb = el.viewBox?.baseVal;
+  if (vb && vb.width > 0 && vb.height > 0) return { w: vb.width, h: vb.height };
+  const wa = parseFloat(el.getAttribute("width") || "");
+  const ha = parseFloat(el.getAttribute("height") || "");
+  if (wa > 0 && ha > 0) return { w: wa, h: ha };
+  const r = el.getBoundingClientRect();
+  return { w: r.width || 800, h: r.height || 600 };
+}
+
+function styledClone(el: SVGSVGElement, w: number, h: number): SVGSVGElement {
+  const clone = el.cloneNode(true) as SVGSVGElement;
+  clone.setAttribute("width", String(w));
+  clone.setAttribute("height", String(h));
+  if (!clone.getAttribute("viewBox")) clone.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+  style.textContent = EXPORT_STYLE;
+  defs.appendChild(style);
+  clone.insertBefore(defs, clone.firstChild);
+  return clone;
+}
+
 export function exportSVG(svgId: string, filename: string) {
   const el = document.getElementById(svgId) as SVGSVGElement | null;
   if (!el) return;
-  const clone = el.cloneNode(true) as SVGSVGElement;
-  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-  style.textContent =
-    'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#1f2937;font-size:10px}.axis-label{font-size:11px}';
-  defs.appendChild(style);
-  clone.insertBefore(defs, clone.firstChild);
-  const ser = new XMLSerializer();
-  const str = ser.serializeToString(clone);
+  const { w, h } = svgPixelSize(el);
+  const clone = styledClone(el, w, h);
+  const str = new XMLSerializer().serializeToString(clone);
   const blob = new Blob([str], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -176,32 +200,21 @@ export function exportSVG(svgId: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function exportPNG(svgId: string, filename: string) {
+export function exportPNG(svgId: string, filename: string, scale = 2) {
   const el = document.getElementById(svgId) as SVGSVGElement | null;
   if (!el) return;
-  const clone = el.cloneNode(true) as SVGSVGElement;
-  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-  style.textContent =
-    'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:#1f2937;font-size:10px}.axis-label{font-size:11px}';
-  defs.appendChild(style);
-  clone.insertBefore(defs, clone.firstChild);
-  const ser = new XMLSerializer();
-  const str = ser.serializeToString(clone);
-
+  const { w, h } = svgPixelSize(el);
+  // Render the vector at `scale`× its intrinsic size for a crisp raster.
+  const clone = styledClone(el, w * scale, h * scale);
+  clone.setAttribute("viewBox", el.getAttribute("viewBox") || `0 0 ${w} ${h}`);
+  const str = new XMLSerializer().serializeToString(clone);
   const blob = new Blob([str], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const img = new Image();
   img.onload = () => {
     const canvas = document.createElement("canvas");
-    const bbox = el.getBoundingClientRect();
-    canvas.width = bbox.width || 800;
-    canvas.height = bbox.height || 600;
-    const wAttr = el.getAttribute("width");
-    const hAttr = el.getAttribute("height");
-    if (wAttr) canvas.width = parseInt(wAttr, 10);
-    if (hAttr) canvas.height = parseInt(hAttr, 10);
-
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
     const ctx = canvas.getContext("2d");
     if (ctx) {
       ctx.fillStyle = "#ffffff";

@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react";
 import { Orbit, BarChartHorizontal, Download, Shuffle } from "lucide-react";
 import { useExplorer } from "@/lib/explore/store";
 import { formatGeneName, pickColor, combinedLabel, symlog, exportPNG } from "@/lib/shared";
+import { oddsColor } from "@/lib/explore/heat";
 import type { PartnerRow } from "@/lib/explore/compute";
 
 type View = "genome" | "linear";
@@ -123,6 +124,9 @@ function GenomeChords(props: ViewProps) {
   const focalMid = focalAnn ? Math.floor((focalAnn.start + focalAnn.end) / 2) : genomeStart;
   const [fx, fy] = ptOf(focalMid);
   const maxOR = useMemo(() => Math.max(10, ...partners.map((p) => p.rawY)), [partners]);
+  const logMax = Math.log10(maxOR);
+  // log-scaled odds ratio → [0,1] so the colour gradient spreads across the range
+  const orT = (or: number) => Math.max(0, Math.min(1, Math.log10(Math.max(1, or)) / (logMax || 1)));
 
   const mbTicks = useMemo(() => {
     const step = 0.5e6, n = Math.floor(genomeLen / step);
@@ -187,16 +191,15 @@ function GenomeChords(props: ViewProps) {
             const [px, py] = ptOf(mid);
             const isActive = p.partner === activeName;
             const isHover = hover?.partner === p.partner;
-            const norm = Math.min(1, p.rawY / maxOR);
-            const op = isHover || isActive ? 0.95 : 0.1 + norm * 0.45;
-            const col = pickColor(p.type);
+            const t = orT(p.rawY); // odds ratio → colour
+            const op = isHover || isActive ? 0.98 : 0.5 + t * 0.45;
             return (
               <path
                 key={p.partner}
                 d={`M ${fx} ${fy} Q ${cx} ${cy} ${px} ${py}`}
                 fill="none"
-                stroke={isActive ? accent : col}
-                strokeWidth={isHover || isActive ? 2.4 : 0.6 + norm * 1.4}
+                stroke={isActive ? accent : oddsColor(t)}
+                strokeWidth={isHover || isActive ? 2.6 : 0.8 + t * 1.8}
                 strokeOpacity={op}
                 strokeLinecap="round"
                 pathLength={1}
@@ -260,6 +263,12 @@ function GenomeChords(props: ViewProps) {
 
         {hover && <HoverCard p={hover} x={ptOf(Math.floor((hover.start + hover.end) / 2))[0]} y={ptOf(Math.floor((hover.start + hover.end) / 2))[1]} w={W} />}
       </svg>
+      <div className="pointer-events-none absolute bottom-1 left-2 flex items-center gap-1.5 text-[10px] text-slate-400">
+        <span>odds ratio</span>
+        <span>low</span>
+        <span className="inline-block h-2 w-20 rounded" style={{ background: `linear-gradient(to right, ${oddsColor(0)}, ${oddsColor(0.5)}, ${oddsColor(1)})` }} />
+        <span>high</span>
+      </div>
       <div className="pointer-events-none absolute bottom-1 right-2 text-[10px] text-slate-400">click = refocus · double-click = pair view</div>
     </div>
   );
@@ -366,7 +375,7 @@ function Legend() {
           {it.l}
         </span>
       ))}
-      <span className="ml-auto text-[11px] text-slate-400">circle area ∝ reads · chord/height ∝ odds ratio</span>
+      <span className="ml-auto text-[11px] text-slate-400">circle area ∝ reads · odds ratio ∝ arc colour (genome) / height (linear)</span>
     </div>
   );
 }

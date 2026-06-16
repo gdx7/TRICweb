@@ -22,6 +22,8 @@ export type SpeciesSource = {
   contactsUrl: string;
   /** All chimeras (.bed) for intramolecular structure; falls back to contacts. */
   structureUrl?: string;
+  /** Genome FASTA (public/) for the binding-site predictor; matches anno accession. */
+  fastaUrl: string;
   /** Key used to build external gene-database deep links. */
   dbKey: DbKey;
 };
@@ -38,6 +40,7 @@ export const SPECIES: SpeciesSource[] = [
     interactionUrl: `${BLOB}/interaction_EC.csv`,
     contactsUrl: `${BLOB}/LR_chimera_EC.bed`,
     structureUrl: `${BLOB}/chimera_EC_all.bed`,
+    fastaUrl: "/EC.fasta",
     dbKey: "EC",
   },
   {
@@ -48,6 +51,7 @@ export const SPECIES: SpeciesSource[] = [
     annoUrl: "/Anno_SA.csv",
     interactionUrl: `${BLOB}/interaction_SA.csv`,
     contactsUrl: `${BLOB}/LR_chimera_SA.bed`,
+    fastaUrl: "/SA.fasta",
     dbKey: "SA",
   },
   {
@@ -58,6 +62,7 @@ export const SPECIES: SpeciesSource[] = [
     annoUrl: "/Anno_SS.csv",
     interactionUrl: `${BLOB}/interaction_SS.csv`,
     contactsUrl: `${BLOB}/LR_chimeras_SS.bed`,
+    fastaUrl: "/SS.fasta",
     dbKey: "SS",
   },
   {
@@ -68,6 +73,7 @@ export const SPECIES: SpeciesSource[] = [
     annoUrl: "/Anno_MX.csv",
     interactionUrl: `${BLOB}/interaction_MX.csv`,
     contactsUrl: `${BLOB}/LR_chimera_MX.bed`,
+    fastaUrl: "/MX.fasta",
     dbKey: "MX",
   },
 ];

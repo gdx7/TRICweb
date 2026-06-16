@@ -37,6 +37,8 @@ type ExplorerState = {
   annotations: Annotation[];
   pairs: Pair[];
   contacts: Array<[number, number]>;
+  genomeSeq: string | null; // in-memory genome for the demo (predictor sequences)
+  fastaUrl: string | null;  // species genome FASTA url (fetched on demand)
 
   // selection / focus
   focal: string;
@@ -196,6 +198,8 @@ export function ExplorerProvider({ children }: { children: React.ReactNode }) {
   const [annotations, setAnnotations] = useState<Annotation[]>(demo.annotations);
   const [pairs, setPairs] = useState<Pair[]>(demo.pairs);
   const [contacts, setContacts] = useState<Array<[number, number]>>(demo.contacts);
+  const [genomeSeq, setGenomeSeq] = useState<string | null>(demo.genomeSeq);
+  const [fastaUrl, setFastaUrl] = useState<string | null>(null);
 
   const [focal, setFocalState] = useState<string>("srna1");
   const [activePartner, setActivePartnerState] = useState<string | null>(null);
@@ -310,6 +314,8 @@ export function ExplorerProvider({ children }: { children: React.ReactNode }) {
     setAnnotations(demo.annotations);
     setPairs(demo.pairs);
     setContacts(demo.contacts);
+    setGenomeSeq(demo.genomeSeq);
+    setFastaUrl(null);
     setDataStatus("loaded");
     setContactsStatus("loaded");
     setDataError(null);
@@ -328,6 +334,8 @@ export function ExplorerProvider({ children }: { children: React.ReactNode }) {
       setSpeciesId(id);
       setSourceLabel(src.short);
       setDbKey(src.dbKey);
+      setGenomeSeq(null);
+      setFastaUrl(src.fastaUrl);
       try {
         const [annoText, pairsText] = await Promise.all([fetchText(src.annoUrl), fetchText(src.interactionUrl)]);
         if (token !== loadToken.current) return;
@@ -372,6 +380,8 @@ export function ExplorerProvider({ children }: { children: React.ReactNode }) {
       setSpeciesId(null);
       setSourceLabel(file.name);
       setDbKey(undefined);
+      setGenomeSeq(null);
+      setFastaUrl(null);
       Papa.parse<any>(file, {
         header: true,
         dynamicTyping: true,
@@ -450,6 +460,8 @@ export function ExplorerProvider({ children }: { children: React.ReactNode }) {
     annotations,
     pairs,
     contacts,
+    genomeSeq,
+    fastaUrl,
     focal,
     activePartner,
     pinned,

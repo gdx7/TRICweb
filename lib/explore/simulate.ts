@@ -13,6 +13,8 @@ export type ExploreDataset = {
   annotations: Annotation[];
   pairs: Pair[];
   contacts: Array<[number, number]>;
+  /** Synthetic genome (DNA) so the Pair-lens predictor has sequences in the demo. */
+  genomeSeq: string;
 };
 
 function mulberry32(seed: number) {
@@ -40,6 +42,14 @@ export function simulateExploreData(seed = 7): ExploreDataset {
     byName.set(a.gene_name, a);
   };
 
+  // Synthetic DNA genome. Complementary duplexes are planted at each interaction
+  // hotspot (emitHotspot), so the demo's predicted binding site lands on the
+  // experimental contact hotspot. All demo features are + strand for clean planting.
+  const genome = new Uint8Array(GENOME_LEN);
+  const BASES = [65, 67, 71, 84]; // A C G T
+  for (let i = 0; i < GENOME_LEN; i++) genome[i] = BASES[(rng() * 4) | 0];
+  const compCode = (c: number) => (c === 65 ? 84 : c === 84 ? 65 : c === 67 ? 71 : c === 71 ? 67 : 78);
+
   // ---- coding genes evenly spread, each with optional 5'/3' UTRs ----
   const nCDS = 84;
   const cdsNames: string[] = [];
@@ -49,7 +59,7 @@ export function simulateExploreData(seed = 7): ExploreDataset {
     const len = randInt(300, 1500);
     const start = base;
     const end = base + len;
-    const strand = rng() > 0.5 ? "+" : "-";
+    const strand = "+";
     const name = `gene${i}`;
     cdsNames.push(name);
     push({ gene_name: name, start, end, feature_type: "CDS", strand, chromosome: "chr" });
@@ -68,7 +78,7 @@ export function simulateExploreData(seed = 7): ExploreDataset {
   for (let i = 1; i <= 11; i++) {
     const start = randInt(1, GENOME_LEN - 400);
     const end = start + randInt(70, 220);
-    push({ gene_name: `srna${i}`, start, end, feature_type: "sRNA", strand: rng() > 0.5 ? "+" : "-", chromosome: "chr" });
+    push({ gene_name: `srna${i}`, start, end, feature_type: "sRNA", strand: "+", chromosome: "chr" });
     srnaNames.push(`srna${i}`);
   }
   const spongeNames: string[] = [];
@@ -92,16 +102,21 @@ export function simulateExploreData(seed = 7): ExploreDataset {
   const contacts: Array<[number, number]> = [];
   const seenPair = new Set<string>();
 
-  // emit a focused cluster of chimera contacts between two features
+  // Plant an antiparallel WC duplex between two features and cluster the chimera
+  // contacts at that site, so prediction + experimental hotspot coincide.
   const emitHotspot = (a: Annotation, b: Annotation, n: number) => {
-    const aoff = 0.25 + rng() * 0.5;
-    const boff = 0.25 + rng() * 0.5;
-    const aHot = Math.round(a.start + (a.end - a.start) * aoff);
-    const bHot = Math.round(b.start + (b.end - b.start) * boff);
+    const la = Math.max(1, a.end - a.start), lb = Math.max(1, b.end - b.start);
+    const L = Math.max(8, Math.min(18, Math.floor(Math.min(la, lb) * 0.5)));
+    const aStart = a.start + Math.min(Math.max(0, la - L), Math.floor(la * (0.2 + rng() * 0.6)));
+    const bStart = b.start + Math.min(Math.max(0, lb - L), Math.floor(lb * (0.2 + rng() * 0.6)));
+    for (let t = 0; t < L; t++) {
+      const ia = aStart - 1 + t;
+      const ib = bStart - 1 + (L - 1 - t); // antiparallel: A[aStart+t] pairs B[bStart+L-1-t]
+      if (ia >= 0 && ia < GENOME_LEN && ib >= 0 && ib < GENOME_LEN) genome[ib] = compCode(genome[ia]);
+    }
+    const aMid = aStart + (L >> 1), bMid = bStart + (L >> 1), j = Math.max(10, L);
     for (let k = 0; k < n; k++) {
-      const c1 = aHot + Math.round((rng() - 0.5) * 36);
-      const c2 = bHot + Math.round((rng() - 0.5) * 36);
-      contacts.push([c1, c2]);
+      contacts.push([aMid + Math.round((rng() - 0.5) * j), bMid + Math.round((rng() - 0.5) * j)]);
     }
   };
 
@@ -198,5 +213,6 @@ export function simulateExploreData(seed = 7): ExploreDataset {
     p.totals = totalByGene.get(p.target);
   }
 
-  return { annotations, pairs, contacts };
+  const genomeSeq = new TextDecoder().decode(genome);
+  return { annotations, pairs, contacts, genomeSeq };
 }

@@ -1,14 +1,18 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Download, Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import { Download, Loader2, AlertCircle, RefreshCw, Dna } from "lucide-react";
 import { useExplorer } from "@/lib/explore/store";
 import { formatGeneName, pickColor, exportPNG } from "@/lib/shared";
 import { buildPairMatrix } from "@/lib/explore/compute";
 import { heatWarm as heat } from "@/lib/explore/heat";
+import { loadGenome, windowSeq } from "@/lib/explore/sequence";
+import { predictDuplex, Duplex } from "@/lib/explore/predict";
+
+type GenStatus = "none" | "loading" | "ready" | "error";
 
 export function PairLens() {
-  const { focal, focalAnn, effectiveActivePartner, geneIndex, contacts, contactsStatus, ensureContacts, speciesId, partners, setActivePartner } = useExplorer();
+  const { focal, focalAnn, effectiveActivePartner, geneIndex, contacts, contactsStatus, ensureContacts, speciesId, partners, setActivePartner, genomeSeq, fastaUrl } = useExplorer();
   const [flankY, setFlankY] = useState(300);
   const [flankX, setFlankX] = useState(300);
   const [bin, setBin] = useState(10);
@@ -19,14 +23,53 @@ export function PairLens() {
   const partner = effectiveActivePartner?.partner;
   const xAnn = partner ? geneIndex[partner] : undefined;
 
-  const m = useMemo(() => {
-    if (!focalAnn || !xAnn || !contacts.length) return null;
-    // keep cell counts sane regardless of gene size
+  const safeBin = useMemo(() => {
+    if (!focalAnn || !xAnn) return bin;
     const lenY = (focalAnn.end - focalAnn.start) + flankY * 2;
     const lenX = (xAnn.end - xAnn.start) + flankX * 2;
-    const safeBin = Math.max(bin, Math.ceil(Math.max(lenY, lenX) / 200));
+    return Math.max(bin, Math.ceil(Math.max(lenY, lenX) / 200));
+  }, [focalAnn, xAnn, flankY, flankX, bin]);
+
+  const m = useMemo(() => {
+    if (!focalAnn || !xAnn || !contacts.length) return null;
     return buildPairMatrix(contacts, focalAnn, xAnn, flankY, flankX, safeBin, partner!);
-  }, [focalAnn, xAnn, contacts, flankY, flankX, bin, partner]);
+  }, [focalAnn, xAnn, contacts, flankY, flankX, safeBin, partner]);
+
+  // ---- genome sequence (demo in-memory, species fetched once) ----
+  const [genome, setGenome] = useState<string | null>(genomeSeq);
+  const [genStatus, setGenStatus] = useState<GenStatus>(genomeSeq ? "ready" : "none");
+  useEffect(() => {
+    if (genomeSeq) { setGenome(genomeSeq); setGenStatus("ready"); return; }
+    setGenome(null);
+    if (!fastaUrl) { setGenStatus("none"); return; }
+    let cancelled = false;
+    setGenStatus("loading");
+    loadGenome(fastaUrl)
+      .then((g) => { if (!cancelled) { setGenome(g); setGenStatus("ready"); } })
+      .catch(() => { if (!cancelled) setGenStatus("error"); });
+    return () => { cancelled = true; };
+  }, [genomeSeq, fastaUrl]);
+
+  // ---- built-in binding-site prediction (RNAduplex-style) ----
+  const prediction = useMemo<Duplex | null>(() => {
+    if (genStatus !== "ready" || !genome || !focalAnn || !xAnn) return null;
+    const s1 = windowSeq(genome, focalAnn, flankY);
+    const s2 = windowSeq(genome, xAnn, flankX);
+    if (s1.length < 7 || s2.length < 7) return null;
+    return predictDuplex(s1, s2);
+  }, [genome, genStatus, focalAnn, xAnn, flankY, flankX]);
+
+  const overlay = useMemo(() => {
+    if (!prediction || !m) return null;
+    const clampY = (v: number) => Math.max(0, Math.min(m.bins_y - 1, v));
+    const clampX = (v: number) => Math.max(0, Math.min(m.bins_x - 1, v));
+    return {
+      y0: clampY(Math.floor(prediction.s1Start / safeBin)),
+      y1: clampY(Math.floor(prediction.s1End / safeBin)),
+      x0: clampX(Math.floor(prediction.s2Start / safeBin)),
+      x1: clampX(Math.floor(prediction.s2End / safeBin)),
+    };
+  }, [prediction, m, safeBin]);
 
   const accent = pickColor(focalAnn?.feature_type);
   const dispY = formatGeneName(focal, focalAnn?.feature_type);
@@ -81,15 +124,87 @@ export function PairLens() {
           <div><AlertCircle className="mx-auto mb-2 h-6 w-6" /> Could not load contacts. <button onClick={ensureContacts} className="ml-1 inline-flex items-center gap-1 underline"><RefreshCw className="h-3 w-3" /> retry</button></div>
         </div>
       ) : m ? (
-        <Heatmap m={m} vmax={vmax || Math.max(1, m.max)} accent={accent} flankX={flankX} flankY={flankY} binUsed={Math.max(bin, Math.ceil(Math.max((focalAnn!.end - focalAnn!.start) + flankY * 2, (xAnn.end - xAnn.start) + flankX * 2) / 200))} dispX={dispX} dispY={dispY} />
+        <Heatmap m={m} vmax={vmax || Math.max(1, m.max)} accent={accent} flankX={flankX} flankY={flankY} binUsed={safeBin} dispX={dispX} dispY={dispY} overlay={overlay} hasPrediction={!!prediction} />
       ) : (
         <div className="grid min-h-[360px] place-items-center text-sm text-slate-400">No contacts fall within this window.</div>
+      )}
+
+      <PredictionPanel
+        prediction={prediction}
+        genStatus={genStatus}
+        accent={accent}
+        flankY={flankY}
+        flankX={flankX}
+        dispY={dispY}
+        dispX={dispX}
+      />
+    </div>
+  );
+}
+
+function PredictionPanel({ prediction, genStatus, accent, flankY, flankX, dispY, dispX }: {
+  prediction: Duplex | null; genStatus: GenStatus; accent: string; flankY: number; flankX: number; dispY: any; dispX: any;
+}) {
+  const rel = (off: number, flank: number) => off - flank + 1; // 1-based position from the feature's 5′ end
+  const span = (lo: number, hi: number, flank: number) => {
+    const a = rel(lo, flank), b = rel(hi, flank);
+    return `${a}–${b}`;
+  };
+
+  return (
+    <div className="mt-4 rounded-2xl border border-slate-200/70 bg-white/60 p-3.5">
+      <div className="mb-2 flex items-center gap-2">
+        <Dna className="h-4 w-4" style={{ color: accent }} />
+        <span className="text-sm font-semibold text-slate-800">Predicted base-pairing</span>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">built-in · RNAduplex-style</span>
+      </div>
+
+      {genStatus === "loading" ? (
+        <div className="flex items-center gap-2 py-3 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading genome sequence…</div>
+      ) : genStatus === "error" ? (
+        <div className="py-3 text-sm text-red-500">Couldn't load the genome FASTA for this species.</div>
+      ) : genStatus === "none" ? (
+        <div className="py-2 text-sm text-slate-400">Sequence-based prediction is available for the bundled species and the demo (it needs a genome to read the RNA sequences).</div>
+      ) : !prediction ? (
+        <div className="py-2 text-sm text-slate-400">No stable duplex (≤ −5 kcal/mol) predicted within this window. Try widening the flanks.</div>
+      ) : (
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+            <Metric label="ΔG (est.)" value={`${prediction.dG.toFixed(1)} kcal/mol`} strong />
+            <Metric label="base pairs" value={`${prediction.pairs}${prediction.gu ? ` (${prediction.gu} G·U)` : ""}`} />
+            <Metric label={`${dispY.text} site`} value={`nt ${span(prediction.s1Start, prediction.s1End, flankY)}`} italic={dispY.italic} />
+            <Metric label={`${dispX.text} site`} value={`nt ${span(prediction.s2Start, prediction.s2End, flankX)}`} italic={dispX.italic} />
+          </div>
+
+          <div className="overflow-x-auto rounded-lg bg-slate-50 px-3 py-2">
+            <pre className="text-[12px] leading-[1.5] text-slate-700" style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+{`${pad(dispY.text)} 5′-${prediction.top}-3′
+${pad("")}    ${prediction.mid}
+${pad(dispX.text)} 3′-${prediction.bot}-5′`}
+            </pre>
+          </div>
+
+          <div className="text-[11px] leading-relaxed text-slate-400">
+            Dashed box on the map marks this site. Built-in estimate (Watson–Crick + G·U, nearest-neighbour energies); approximates IntaRNA's seed but omits the accessibility term — treat ΔG as an estimate. Site positions are relative to each RNA's 5′ end (≤ 0 = upstream flank).
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
-function Heatmap({ m, vmax, accent, flankX, flankY, binUsed, dispX, dispY }: any) {
+const pad = (s: string) => (s.length >= 8 ? s.slice(0, 8) : s + " ".repeat(8 - s.length));
+
+function Metric({ label, value, strong, italic }: { label: string; value: string; strong?: boolean; italic?: boolean }) {
+  return (
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className="text-slate-400" style={{ fontStyle: italic ? "italic" : "normal" }}>{label}</span>
+      <span className={strong ? "font-bold text-slate-900" : "font-medium text-slate-700"}>{value}</span>
+    </span>
+  );
+}
+
+function Heatmap({ m, vmax, accent, flankX, flankY, binUsed, dispX, dispY, overlay, hasPrediction }: any) {
   const W = 560, H = 520;
   const padL = 64, padB = 64, padT = 16, padR = 40;
   const cw = (W - padL - padR) / m.bins_x;
@@ -116,7 +231,26 @@ function Heatmap({ m, vmax, accent, flankX, flankY, binUsed, dispX, dispY }: any
         <defs><style>{`text{font-family:ui-sans-serif,system-ui;font-size:10px;fill:#64748b}`}</style></defs>
         <rect x={padL} y={padT} width={W - padL - padR} height={H - padT - padB} fill="#fff" stroke="#e2e8f0" />
         {cells}
+        {overlay && (
+          <rect
+            x={padL + overlay.x0 * cw}
+            y={yPix(overlay.y1)}
+            width={(overlay.x1 - overlay.x0 + 1) * cw}
+            height={(overlay.y1 - overlay.y0 + 1) * ch}
+            fill="none"
+            stroke={accent}
+            strokeWidth={2}
+            strokeDasharray="4 3"
+            rx={2}
+          />
+        )}
         <rect x={padL} y={padT} width={W - padL - padR} height={H - padT - padB} fill="none" stroke="#cbd5e1" />
+        {hasPrediction && (
+          <g transform={`translate(${padL + 4},${padT + 4})`}>
+            <rect x={0} y={0} width={11} height={11} rx={2} fill="none" stroke={accent} strokeWidth={2} strokeDasharray="3 2" />
+            <text x={16} y={9.5} fontSize={9.5} fill="#64748b">predicted duplex</text>
+          </g>
+        )}
         {xTicks.map(([b, l], i) => (
           <g key={i} transform={`translate(${padL + (Number(b) / m.bins_x) * (W - padL - padR)},${H - padB})`}>
             <line y2={5} stroke="#94a3b8" /><text y={17} textAnchor="middle">{l}</text>

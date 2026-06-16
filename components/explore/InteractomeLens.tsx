@@ -125,17 +125,19 @@ function GenomeChords(props: ViewProps) {
   const focalMid = focalAnn ? Math.floor((focalAnn.start + focalAnn.end) / 2) : genomeStart;
   const [fx, fy] = ptOf(focalMid);
 
-  // Normalise odds ratio and reads across the ACTUAL data range (log scale) so the
-  // colour and width spread maximally — this is what makes high vs low contrast.
-  const { orT, widthT } = useMemo(() => {
-    const ors = partners.map((p) => Math.log10(Math.max(1, p.rawY)));
+  // Odds ratio → colour, anchored at 0 (low) and max(10, observed max) (high) so
+  // unspecific interactions (OR < 10) stay light and never get highlighted. Reads
+  // → arc width on a log scale across the data range.
+  const { orT, widthT, orHigh } = useMemo(() => {
     const cts = partners.map((p) => Math.log10(Math.max(1, p.counts)));
-    const oLo = ors.length ? Math.min(...ors) : 0;
-    const oHi = ors.length ? Math.max(...ors) : 1;
     const cLo = cts.length ? Math.min(...cts) : 0;
     const cHi = cts.length ? Math.max(...cts) : 1;
+    const maxOR = partners.reduce((mx, p) => Math.max(mx, p.rawY), 0);
+    const orHigh = Math.max(10, maxOR);
+    const lh = Math.log1p(orHigh) || 1;
     return {
-      orT: (or: number) => (oHi > oLo ? (Math.log10(Math.max(1, or)) - oLo) / (oHi - oLo) : 0.6),
+      orHigh,
+      orT: (or: number) => Math.max(0, Math.min(1, Math.log1p(Math.max(0, or)) / lh)),
       widthT: (c: number) => (cHi > cLo ? (Math.log10(Math.max(1, c)) - cLo) / (cHi - cLo) : 0.5),
     };
   }, [partners]);
@@ -282,9 +284,9 @@ function GenomeChords(props: ViewProps) {
       </svg>
       <div className="pointer-events-none absolute bottom-1 left-2 flex items-center gap-1.5 text-[10px] text-slate-400">
         <span>odds ratio</span>
-        <span>low</span>
+        <span className="tabular-nums">0</span>
         <span className="inline-block h-2 w-20 rounded" style={{ background: `linear-gradient(to right, ${oddsColor(0)}, ${oddsColor(0.5)}, ${oddsColor(1)})` }} />
-        <span>high</span>
+        <span className="tabular-nums">{orHigh >= 1000 ? `${(orHigh / 1000).toFixed(1)}k` : Math.round(orHigh)}</span>
       </div>
       <div className="pointer-events-none absolute bottom-1 right-2 text-[10px] text-slate-400">click = refocus · double-click = pair view</div>
     </div>

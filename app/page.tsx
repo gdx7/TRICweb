@@ -88,19 +88,20 @@ export default function Home() {
         </div>
       </section>
 
-      {/* INDIVIDUAL TOOLS */}
+      {/* ORIGINAL LEGACY TOOLS */}
       <section className="relative mx-auto max-w-6xl px-6 pb-20 pt-6">
-        <div className="mb-5 flex items-end justify-between">
-          <div>
-            <h2 className="text-lg font-bold tracking-tight text-slate-900">Or jump straight to a single tool</h2>
-            <p className="text-sm text-slate-500">The classic standalone views, still here for focused analysis.</p>
-          </div>
+        <div className="mb-3 flex items-center gap-2">
+          <h2 className="text-sm font-semibold tracking-tight text-slate-600">Original legacy tools</h2>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-400">legacy</span>
         </div>
-        <div className="grid gap-5 sm:grid-cols-2 md:grid-cols-4">
-          <ToolCard title="globalMAP" href="/global" desc="RNA-centric global interaction map with clickable partners" icon={Globe} />
-          <ToolCard title="csMAP" href="/csmap" desc="Multi-RNA comparative target profiles" icon={Copyleft} />
-          <ToolCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps for binding sites" icon={GitMerge} />
-          <ToolCard title="foldMAP" href="/foldmap" desc="Structural contact maps of RNAs" icon={Network} />
+        <p className="mb-4 max-w-2xl text-xs text-slate-400">
+          The original standalone tools, superseded by the Explorer above — kept for reference and focused single-analysis workflows.
+        </p>
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          <LegacyCard title="globalMAP" href="/global" desc="Global interaction map" icon={Globe} />
+          <LegacyCard title="csMAP" href="/csmap" desc="Comparative target profiles" icon={Copyleft} />
+          <LegacyCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps" icon={GitMerge} />
+          <LegacyCard title="foldMAP" href="/foldmap" desc="Structural contact maps" icon={Network} />
         </div>
       </section>
     </div>
@@ -117,23 +118,20 @@ function LensChip({ icon: Icon, title, desc }: { icon: React.ElementType; title:
   );
 }
 
-function ToolCard({ title, desc, href, icon: Icon }: { title: string; desc: string; href: string; icon: React.ElementType }) {
+function LegacyCard({ title, desc, href, icon: Icon }: { title: string; desc: string; href: string; icon: React.ElementType }) {
   return (
     <Link
       href={href}
-      className="group flex flex-col justify-between rounded-2xl border border-slate-200/60 bg-white/50 backdrop-blur-xl shadow-sm hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300 hover:-translate-y-1.5 p-6 h-full ring-1 ring-transparent hover:ring-slate-300/50 focus-visible:ring-2 focus-visible:ring-slate-400 focus:outline-none overflow-hidden relative"
+      className="group flex items-center gap-3 rounded-xl border border-slate-200/70 bg-white/40 px-3 py-2.5 transition hover:border-slate-300 hover:bg-white focus-visible:ring-2 focus-visible:ring-slate-400 focus:outline-none"
     >
-      <div className="absolute inset-0 bg-gradient-to-br from-transparent to-slate-50/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-      <div className="relative z-10">
-        <div className="mb-5 inline-flex flex-shrink-0 items-center justify-center p-3 rounded-xl bg-slate-100 text-slate-700 group-hover:bg-slate-800 group-hover:text-white shadow-sm transition-colors">
-          <Icon className="h-6 w-6" />
-        </div>
-        <div className="text-xl font-bold mb-2 tracking-tight text-slate-900">{title}</div>
-        <p className="text-slate-600 text-sm leading-relaxed">{desc}</p>
-      </div>
-      <div className="mt-8 relative z-10 inline-flex w-fit items-center gap-2 text-sm font-semibold text-slate-500 group-hover:text-slate-900 transition-colors">
-        Explore <span className="transition-transform duration-300 group-hover:translate-x-1.5">→</span>
-      </div>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-400 transition-colors group-hover:bg-slate-700 group-hover:text-white">
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-slate-600 group-hover:text-slate-900">{title}</span>
+        <span className="block truncate text-[11px] text-slate-400">{desc}</span>
+      </span>
+      <span className="ml-auto text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-500">→</span>
     </Link>
   );
 }

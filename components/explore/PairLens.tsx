@@ -201,7 +201,7 @@ ${pad(dispX.text)} 3′-${prediction.bot}-5′`}
           </div>
 
           <div className="text-[11px] leading-relaxed text-slate-400">
-            Dashed box on the map marks this site. Searched within ±30 nt of each feature. Built-in estimate (Watson–Crick + G·U, nearest-neighbour energies); approximates IntaRNA's seed but omits the accessibility term — treat ΔG as an estimate. Site positions are relative to each RNA's 5′ end (≤ 0 = upstream flank).
+            Red cross on the map marks this site. Searched within ±30 nt of each feature. Built-in estimate (Watson–Crick + G·U, nearest-neighbour energies); approximates IntaRNA's seed but omits the accessibility term — treat ΔG as an estimate. Site positions are relative to each RNA's 5′ end (≤ 0 = upstream flank).
           </div>
         </div>
       )}
@@ -247,24 +247,25 @@ function Heatmap({ m, vmax, accent, flankX, flankY, binUsed, dispX, dispY, overl
         <defs><style>{`text{font-family:ui-sans-serif,system-ui;font-size:10px;fill:#64748b}`}</style></defs>
         <rect x={padL} y={padT} width={W - padL - padR} height={H - padT - padB} fill="#fff" stroke="#e2e8f0" />
         {cells}
-        {overlay && (
-          <rect
-            x={padL + overlay.x0 * cw}
-            y={yPix(overlay.y1)}
-            width={(overlay.x1 - overlay.x0 + 1) * cw}
-            height={(overlay.y1 - overlay.y0 + 1) * ch}
-            fill="none"
-            stroke={accent}
-            strokeWidth={2}
-            strokeDasharray="4 3"
-            rx={2}
-          />
-        )}
+        {overlay && (() => {
+          const xC = padL + ((overlay.x0 + overlay.x1 + 1) / 2) * cw;
+          const yC = yPix(overlay.y1) + ((overlay.y1 - overlay.y0 + 1) * ch) / 2;
+          const a = 7;
+          return (
+            <g pointerEvents="none">
+              <line x1={xC - a} y1={yC - a} x2={xC + a} y2={yC + a} stroke="#fff" strokeWidth={4.5} strokeLinecap="round" />
+              <line x1={xC - a} y1={yC + a} x2={xC + a} y2={yC - a} stroke="#fff" strokeWidth={4.5} strokeLinecap="round" />
+              <line x1={xC - a} y1={yC - a} x2={xC + a} y2={yC + a} stroke="#dc2626" strokeWidth={2.2} strokeLinecap="round" />
+              <line x1={xC - a} y1={yC + a} x2={xC + a} y2={yC - a} stroke="#dc2626" strokeWidth={2.2} strokeLinecap="round" />
+            </g>
+          );
+        })()}
         <rect x={padL} y={padT} width={W - padL - padR} height={H - padT - padB} fill="none" stroke="#cbd5e1" />
         {hasPrediction && (
-          <g transform={`translate(${padL + 4},${padT + 4})`}>
-            <rect x={0} y={0} width={11} height={11} rx={2} fill="none" stroke={accent} strokeWidth={2} strokeDasharray="3 2" />
-            <text x={16} y={9.5} fontSize={9.5} fill="#64748b">predicted duplex</text>
+          <g transform={`translate(${padL + 5},${padT + 6})`}>
+            <line x1={0} y1={0} x2={9} y2={9} stroke="#dc2626" strokeWidth={2} strokeLinecap="round" />
+            <line x1={0} y1={9} x2={9} y2={0} stroke="#dc2626" strokeWidth={2} strokeLinecap="round" />
+            <text x={15} y={8.5} fontSize={9.5} fill="#64748b">predicted site</text>
           </g>
         )}
         {xTicks.map(([b, l], i) => (

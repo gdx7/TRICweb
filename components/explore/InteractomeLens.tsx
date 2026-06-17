@@ -154,7 +154,7 @@ function GenomeChords(props: ViewProps) {
   const W = 760, H = 660;
   const cx = W / 2, cy = H / 2 + 4;
   const R = 244;
-  const DENS_BINS = 150, DENS_LEN = 92;
+  const DENS_LEN = 92;
 
   const ang = (p: number) => ((p - genomeStart) / genomeLen) * Math.PI * 2 - Math.PI / 2;
   const ptOf = (p: number, r = R) => {
@@ -187,7 +187,7 @@ function GenomeChords(props: ViewProps) {
     return Array.from({ length: n }, (_, i) => genomeStart + (i + 1) * step);
   }, [genomeStart, genomeLen]);
 
-  // dedupe labels by angular proximity
+  // dedupe labels by angular proximity (radial labels pack tighter, so allow more)
   const labels = useMemo(() => {
     const placed: number[] = [];
     return [...partners]
@@ -195,24 +195,33 @@ function GenomeChords(props: ViewProps) {
       .filter((p) => p.rawY >= labelThreshold)
       .filter((p) => {
         const a = ang(Math.floor((p.start + p.end) / 2));
-        if (placed.some((q) => Math.abs(q - a) < 0.09)) return false;
+        if (placed.some((q) => Math.abs(q - a) < 0.045)) return false;
         placed.push(a);
         return true;
       })
-      .slice(0, 28);
+      .slice(0, 64);
   }, [partners, labelThreshold, genomeStart, genomeLen]);
 
   const sorted = useMemo(() => [...partners].sort((a, b) => a.rawY - b.rawY), [partners]);
 
-  // circular histogram: partners per genomic bin, so clusters read as tall bars
+  // density: partners per 20-kb window, smoothed with a circular rolling average,
+  // on a linear scale (taller bar = more partners in that region)
   const { densBars, densMax } = useMemo(() => {
-    const counts = new Array(DENS_BINS).fill(0);
+    const BIN_BP = 20000;
+    const nBins = Math.max(8, Math.ceil(genomeLen / BIN_BP));
+    const raw = new Array(nBins).fill(0);
     for (const p of partners) {
       const mid = (p.start + p.end) / 2;
-      const bi = Math.min(DENS_BINS - 1, Math.max(0, Math.floor(((mid - genomeStart) / genomeLen) * DENS_BINS)));
-      counts[bi]++;
+      const bi = Math.min(nBins - 1, Math.max(0, Math.floor((mid - genomeStart) / BIN_BP)));
+      raw[bi]++;
     }
-    return { densBars: counts as number[], densMax: Math.max(1, ...counts) };
+    const win = 2; // ±2 bins ≈ 100-kb rolling window
+    const smooth = raw.map((_, i) => {
+      let s = 0;
+      for (let j = -win; j <= win; j++) s += raw[(i + j + nBins) % nBins];
+      return s / (2 * win + 1);
+    });
+    return { densBars: smooth as number[], densMax: Math.max(1e-6, ...smooth) };
   }, [partners, genomeStart, genomeLen]);
 
   const focalDisp = formatGeneName(focal, focalAnn?.feature_type);
@@ -235,8 +244,8 @@ function GenomeChords(props: ViewProps) {
         <circle cx={cx} cy={cy} r={R + 26} fill="url(#ring-glow)" />
 
         {/* genome ring + ticks */}
-        <circle cx={cx} cy={cy} r={R} fill="none" stroke="#e2e8f0" strokeWidth={10} />
-        <circle cx={cx} cy={cy} r={R} fill="none" stroke="#cbd5e1" strokeWidth={1} />
+        <circle cx={cx} cy={cy} r={R} fill="none" stroke="#cbd5e1" strokeWidth={10} />
+        <circle cx={cx} cy={cy} r={R} fill="none" stroke="#475569" strokeWidth={1.25} />
         {mbTicks.map((p, i) => {
           const [x1, y1] = ptOf(p, R - 6);
           const [x2, y2] = ptOf(p, R + 6);
@@ -284,13 +293,13 @@ function GenomeChords(props: ViewProps) {
           <g pointerEvents="none">
             {densBars.map((c, i) => {
               if (c <= 0) return null;
-              const a = ((i + 0.5) / DENS_BINS) * Math.PI * 2 - Math.PI / 2;
-              const len = (c / densMax) * DENS_LEN;
+              const a = ((i + 0.5) / densBars.length) * Math.PI * 2 - Math.PI / 2;
+              const len = (c / densMax) * DENS_LEN; // linear
               return (
                 <line key={i}
                   x1={cx + Math.cos(a) * (R - 1)} y1={cy + Math.sin(a) * (R - 1)}
                   x2={cx + Math.cos(a) * (R - 1 - len)} y2={cy + Math.sin(a) * (R - 1 - len)}
-                  stroke={accent} strokeWidth={2.4} strokeLinecap="round" opacity={0.55}
+                  stroke={accent} strokeWidth={2.2} strokeLinecap="round" opacity={0.5}
                 />
               );
             })}
@@ -327,15 +336,16 @@ function GenomeChords(props: ViewProps) {
           })}
         </g>
 
-        {/* partner labels */}
+        {/* partner labels — radial, so more names fit around the ring */}
         {labels.map((p) => {
           const mid = Math.floor((p.start + p.end) / 2);
           const a = ang(mid);
-          const [lx, ly] = ptOf(mid, R + 34);
-          const anchor = Math.cos(a) > 0.1 ? "start" : Math.cos(a) < -0.1 ? "end" : "middle";
+          const [lx, ly] = ptOf(mid, R + 7);
+          const flip = Math.cos(a) < 0; // left half → rotate 180° so text isn't upside down
+          const rot = (a * 180) / Math.PI + (flip ? 180 : 0);
           const disp = formatGeneName(p.partner, p.type);
           return (
-            <text key={p.partner} x={lx} y={ly} fontSize={10.5} fill="#475569" textAnchor={anchor as any} dominantBaseline="middle"
+            <text key={p.partner} transform={`translate(${lx},${ly}) rotate(${rot})`} fontSize={10} fill="#475569" textAnchor={flip ? "end" : "start"} dominantBaseline="middle"
               style={{ fontStyle: disp.italic ? "italic" : "normal", cursor: "pointer" }} onClick={() => onClick(p.partner)}>
               {disp.text}
             </text>
@@ -357,7 +367,7 @@ function GenomeChords(props: ViewProps) {
       {density && (
         <div className="pointer-events-none absolute top-1 left-2 flex items-center gap-1.5 text-[10px] text-slate-500">
           <BarChart3 className="h-3 w-3" />
-          <span>partners per region · peak {densMax}</span>
+          <span>partners per 20 kb · rolling average</span>
         </div>
       )}
       <div className="pointer-events-none absolute bottom-1 left-2 flex items-center gap-1.5 text-[10px] text-slate-400">

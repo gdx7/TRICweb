@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { Globe, Copyleft, GitMerge, Network, ArrowRight, Sparkles, Orbit, Grid2x2, Atom, Columns3 } from "lucide-react";
+import { ArrowRight, Sparkles, Orbit, Grid2x2, Atom, Columns3 } from "lucide-react";
 
 const FEATURE_COLORS = ["#F78208", "#76AAD7", "#0C0C0C", "#A40194", "#82F778", "#999999", "#F12C2C", "#C4C5C5"];
 
@@ -98,10 +98,10 @@ export default function Home() {
           The original standalone tools, superseded by the Explorer above — kept for reference and focused single-analysis workflows.
         </p>
         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-          <LegacyCard title="globalMAP" href="/global" desc="Global interaction map" icon={Globe} />
-          <LegacyCard title="csMAP" href="/csmap" desc="Comparative target profiles" icon={Copyleft} />
-          <LegacyCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps" icon={GitMerge} />
-          <LegacyCard title="foldMAP" href="/foldmap" desc="Structural contact maps" icon={Network} />
+          <LegacyCard title="globalMAP" href="/global" desc="Global interaction map" icon={Orbit} />
+          <LegacyCard title="csMAP" href="/csmap" desc="Comparative target profiles" icon={Columns3} />
+          <LegacyCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps" icon={Grid2x2} />
+          <LegacyCard title="foldMAP" href="/foldmap" desc="Structural contact maps" icon={Atom} />
         </div>
       </section>
     </div>

@@ -154,7 +154,6 @@ function GenomeChords(props: ViewProps) {
   const W = 760, H = 660;
   const cx = W / 2, cy = H / 2 + 4;
   const R = 244;
-  const DENS_LEN = 92;
 
   const ang = (p: number) => ((p - genomeStart) / genomeLen) * Math.PI * 2 - Math.PI / 2;
   const ptOf = (p: number, r = R) => {
@@ -204,24 +203,24 @@ function GenomeChords(props: ViewProps) {
 
   const sorted = useMemo(() => [...partners].sort((a, b) => a.rawY - b.rawY), [partners]);
 
-  // density: partners per 20-kb window, smoothed with a circular rolling average,
-  // on a linear scale (taller bar = more partners in that region)
-  const { densBars, densMax } = useMemo(() => {
-    const BIN_BP = 20000;
-    const nBins = Math.max(8, Math.ceil(genomeLen / BIN_BP));
-    const raw = new Array(nBins).fill(0);
+  // density "heat ring": local target density in a sliding genomic window mapped
+  // to colour intensity on a thin band just inside the ring — a localized cluster
+  // of targets lights up as a bright arc, an even spread stays faint.
+  const densSegments = useMemo(() => {
+    const N = Math.max(90, Math.min(720, Math.round(genomeLen / 8000))); // ~8-kb segments
+    const half = Math.max(1, Math.round(N * 0.012)); // sliding window ≈ ±1.2% of genome
+    const raw = new Array(N).fill(0);
     for (const p of partners) {
       const mid = (p.start + p.end) / 2;
-      const bi = Math.min(nBins - 1, Math.max(0, Math.floor((mid - genomeStart) / BIN_BP)));
+      const bi = Math.min(N - 1, Math.max(0, Math.floor(((mid - genomeStart) / genomeLen) * N)));
       raw[bi]++;
     }
-    const win = 2; // ±2 bins ≈ 100-kb rolling window
-    const smooth = raw.map((_, i) => {
+    const dens = raw.map((_, i) => {
       let s = 0;
-      for (let j = -win; j <= win; j++) s += raw[(i + j + nBins) % nBins];
-      return s / (2 * win + 1);
+      for (let j = -half; j <= half; j++) s += raw[(i + j + N) % N];
+      return s;
     });
-    return { densBars: smooth as number[], densMax: Math.max(1e-6, ...smooth) };
+    return { N, dens, max: Math.max(1, ...dens) };
   }, [partners, genomeStart, genomeLen]);
 
   const focalDisp = formatGeneName(focal, focalAnn?.feature_type);
@@ -230,18 +229,12 @@ function GenomeChords(props: ViewProps) {
     <div className="relative w-full overflow-x-auto">
       <svg id="interactome-genome" width="100%" viewBox={`0 0 ${W} ${H}`} className="mx-auto block" style={{ maxHeight: 620 }}>
         <defs>
-          <radialGradient id="ring-glow" cx="50%" cy="50%" r="50%">
-            <stop offset="60%" stopColor={accent} stopOpacity={0} />
-            <stop offset="100%" stopColor={accent} stopOpacity={0.12} />
-          </radialGradient>
           <radialGradient id="focal-glow" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor={accent} stopOpacity={0.5} />
             <stop offset="100%" stopColor={accent} stopOpacity={0} />
           </radialGradient>
           <style>{`text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}`}</style>
         </defs>
-
-        <circle cx={cx} cy={cy} r={R + 26} fill="url(#ring-glow)" />
 
         {/* genome ring + ticks */}
         <circle cx={cx} cy={cy} r={R} fill="none" stroke="#cbd5e1" strokeWidth={10} />
@@ -271,7 +264,7 @@ function GenomeChords(props: ViewProps) {
             const wT = widthT(p.counts);  // log(reads) → width
             const emph = isHover || isActive;
             // low OR recedes; density mode fades non-RIL chords so the histogram reads
-            const op = emph ? 0.98 : isRil ? (density ? 0.65 : 0.9) : density ? 0.06 : 0.12 + t * 0.72;
+            const op = emph ? 0.98 : isRil ? 0.9 : 0.12 + t * 0.72;
             return (
               <path
                 key={p.partner}
@@ -288,18 +281,19 @@ function GenomeChords(props: ViewProps) {
           })}
         </g>
 
-        {/* circular density histogram (inward radial bars) */}
+        {/* density heat-ring: a localized cluster of targets glows as a bright arc */}
         {density && (
           <g pointerEvents="none">
-            {densBars.map((c, i) => {
+            {densSegments.dens.map((c, i) => {
               if (c <= 0) return null;
-              const a = ((i + 0.5) / densBars.length) * Math.PI * 2 - Math.PI / 2;
-              const len = (c / densMax) * DENS_LEN; // linear
+              const a = ((i + 0.5) / densSegments.N) * Math.PI * 2 - Math.PI / 2;
+              const t = c / densSegments.max;
+              const aw = (2 * Math.PI * (R - 9)) / densSegments.N + 1.4;
               return (
                 <line key={i}
-                  x1={cx + Math.cos(a) * (R - 1)} y1={cy + Math.sin(a) * (R - 1)}
-                  x2={cx + Math.cos(a) * (R - 1 - len)} y2={cy + Math.sin(a) * (R - 1 - len)}
-                  stroke={accent} strokeWidth={2.2} strokeLinecap="round" opacity={0.5}
+                  x1={cx + Math.cos(a) * (R - 2)} y1={cy + Math.sin(a) * (R - 2)}
+                  x2={cx + Math.cos(a) * (R - 16)} y2={cy + Math.sin(a) * (R - 16)}
+                  stroke={accent} strokeWidth={aw} strokeOpacity={0.1 + t * 0.8}
                 />
               );
             })}
@@ -340,7 +334,7 @@ function GenomeChords(props: ViewProps) {
         {labels.map((p) => {
           const mid = Math.floor((p.start + p.end) / 2);
           const a = ang(mid);
-          const [lx, ly] = ptOf(mid, R + 7);
+          const [lx, ly] = ptOf(mid, R + 16);
           const flip = Math.cos(a) < 0; // left half → rotate 180° so text isn't upside down
           const rot = (a * 180) / Math.PI + (flip ? 180 : 0);
           const disp = formatGeneName(p.partner, p.type);
@@ -367,7 +361,7 @@ function GenomeChords(props: ViewProps) {
       {density && (
         <div className="pointer-events-none absolute top-1 left-2 flex items-center gap-1.5 text-[10px] text-slate-500">
           <BarChart3 className="h-3 w-3" />
-          <span>partners per 20 kb · rolling average</span>
+          <span>local target density · clusters glow brighter</span>
         </div>
       )}
       <div className="pointer-events-none absolute bottom-1 left-2 flex items-center gap-1.5 text-[10px] text-slate-400">

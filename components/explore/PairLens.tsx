@@ -5,7 +5,7 @@ import { Download, Loader2, AlertCircle, RefreshCw, Dna } from "lucide-react";
 import { useExplorer } from "@/lib/explore/store";
 import { formatGeneName, pickColor, exportPNG } from "@/lib/shared";
 import { buildPairMatrix } from "@/lib/explore/compute";
-import { heatWarm as heat } from "@/lib/explore/heat";
+import { oddsColor as heat } from "@/lib/explore/heat";
 import { loadGenome, windowSeq } from "@/lib/explore/sequence";
 import { predictDuplex, Duplex } from "@/lib/explore/predict";
 

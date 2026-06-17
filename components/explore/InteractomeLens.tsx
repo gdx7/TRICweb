@@ -1,11 +1,15 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { Orbit, BarChartHorizontal, Download, Shuffle } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Orbit, BarChartHorizontal, Download, Shuffle, BarChart3, Target } from "lucide-react";
 import { useExplorer } from "@/lib/explore/store";
-import { formatGeneName, pickColor, combinedLabel, symlog, exportPNG } from "@/lib/shared";
+import { formatGeneName, pickColor, combinedLabel, symlog, exportPNG, baseGene, keyForPair } from "@/lib/shared";
 import { oddsColor } from "@/lib/explore/heat";
+import { loadRilPairs } from "@/lib/explore/rilseq";
 import type { PartnerRow } from "@/lib/explore/compute";
+
+const RIL_FILL = "#2DD4BF";
+const RIL_STROKE = "#0d9488";
 
 type View = "genome" | "linear";
 
@@ -17,10 +21,26 @@ export function InteractomeLens() {
   } = useExplorer();
   const [view, setView] = useState<View>("genome");
   const [hover, setHover] = useState<PartnerRow | null>(null);
+  const [ril, setRil] = useState(false);
+  const [rilSet, setRilSet] = useState<Set<string> | null>(null);
+  const [density, setDensity] = useState(false);
+
+  useEffect(() => {
+    if (ril && !rilSet) loadRilPairs().then(setRilSet).catch(() => {});
+  }, [ril, rilSet]);
 
   const accent = pickColor(focalAnn?.feature_type);
   // Only an explicitly chosen partner is emphasised — never the auto-default top one.
   const activeName = activePartner ?? undefined;
+
+  // partners of the focal that are known RIL-seq pairs (E. coli)
+  const rilHits = useMemo(() => {
+    if (!ril || !rilSet) return null;
+    const fl = baseGene(focal).toLowerCase();
+    const s = new Set<string>();
+    for (const p of partners) if (rilSet.has(keyForPair(fl, baseGene(p.partner).toLowerCase()))) s.add(p.partner);
+    return s;
+  }, [ril, rilSet, focal, partners]);
 
   return (
     <div className="glass rounded-3xl p-4 sm:p-5">
@@ -44,6 +64,22 @@ export function InteractomeLens() {
               <BarChartHorizontal className="h-3.5 w-3.5" /> Linear
             </button>
           </div>
+          <button
+            onClick={() => setRil((v) => !v)}
+            title="Highlight known E. coli RIL-seq targets (Melamed et al. 2016)"
+            className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition ${ril ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-500 hover:text-slate-800"}`}
+          >
+            <Target className="h-3.5 w-3.5" /> RIL-seq{ril && rilHits ? ` (${rilHits.size})` : ""}
+          </button>
+          {view === "genome" && (
+            <button
+              onClick={() => setDensity((v) => !v)}
+              title="Overlay a circular density histogram of partners per genomic region"
+              className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition ${density ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-500 hover:text-slate-800"}`}
+            >
+              <BarChart3 className="h-3.5 w-3.5" /> Density
+            </button>
+          )}
           <button onClick={pickRandom} title="Jump to a well-connected RNA" className="grid h-7 w-7 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800">
             <Shuffle className="h-3.5 w-3.5" />
           </button>
@@ -61,6 +97,7 @@ export function InteractomeLens() {
             yCap={yCap} labelThreshold={labelThreshold} sizeScale={sizeScale}
             highlight={highlight} activeName={activeName} hover={hover} setHover={setHover}
             onClick={setFocal} onActivate={(g) => setActivePartner(g)}
+            density={density} rilHits={rilHits}
           />
         ) : (
           <LinearScatter
@@ -69,11 +106,12 @@ export function InteractomeLens() {
             yCap={yCap} labelThreshold={labelThreshold} sizeScale={sizeScale}
             highlight={highlight} activeName={activeName} hover={hover} setHover={setHover}
             onClick={setFocal} onActivate={(g) => setActivePartner(g)}
+            rilHits={rilHits}
           />
         )}
       </div>
 
-      <Legend />
+      <Legend showRil={!!rilHits} />
     </div>
   );
 }
@@ -85,6 +123,7 @@ type ViewProps = {
   highlight: Set<string>; activeName?: string;
   hover: PartnerRow | null; setHover: (p: PartnerRow | null) => void;
   onClick: (g: string) => void; onActivate: (g: string) => void;
+  density?: boolean; rilHits?: Set<string> | null;
 };
 
 function HoverCard({ p, x, y, w }: { p: PartnerRow; x: number; y: number; w: number }) {
@@ -111,10 +150,11 @@ function HoverCard({ p, x, y, w }: { p: PartnerRow; x: number; y: number; w: num
 
 // ---------------- Circos-style genome chords ----------------
 function GenomeChords(props: ViewProps) {
-  const { focal, accent, focalAnn, focalTotal, partners, genomeStart, genomeLen, labelThreshold, sizeScale, highlight, activeName, hover, setHover, onClick, onActivate } = props;
+  const { focal, accent, focalAnn, focalTotal, partners, genomeStart, genomeLen, labelThreshold, sizeScale, highlight, activeName, hover, setHover, onClick, onActivate, density, rilHits } = props;
   const W = 760, H = 660;
   const cx = W / 2, cy = H / 2 + 4;
   const R = 244;
+  const DENS_BINS = 150, DENS_LEN = 92;
 
   const ang = (p: number) => ((p - genomeStart) / genomeLen) * Math.PI * 2 - Math.PI / 2;
   const ptOf = (p: number, r = R) => {
@@ -163,6 +203,18 @@ function GenomeChords(props: ViewProps) {
   }, [partners, labelThreshold, genomeStart, genomeLen]);
 
   const sorted = useMemo(() => [...partners].sort((a, b) => a.rawY - b.rawY), [partners]);
+
+  // circular histogram: partners per genomic bin, so clusters read as tall bars
+  const { densBars, densMax } = useMemo(() => {
+    const counts = new Array(DENS_BINS).fill(0);
+    for (const p of partners) {
+      const mid = (p.start + p.end) / 2;
+      const bi = Math.min(DENS_BINS - 1, Math.max(0, Math.floor(((mid - genomeStart) / genomeLen) * DENS_BINS)));
+      counts[bi]++;
+    }
+    return { densBars: counts as number[], densMax: Math.max(1, ...counts) };
+  }, [partners, genomeStart, genomeLen]);
+
   const focalDisp = formatGeneName(focal, focalAnn?.feature_type);
 
   return (
@@ -205,18 +257,19 @@ function GenomeChords(props: ViewProps) {
             const [px, py] = ptOf(mid);
             const isActive = p.partner === activeName;
             const isHover = hover?.partner === p.partner;
+            const isRil = !!rilHits?.has(p.partner);
             const t = orT(p.rawY);        // odds ratio → colour
             const wT = widthT(p.counts);  // log(reads) → width
             const emph = isHover || isActive;
-            // low OR recedes (faint), high OR pops — keeps the plot uncluttered
-            const op = emph ? 0.98 : 0.12 + t * 0.72;
+            // low OR recedes; density mode fades non-RIL chords so the histogram reads
+            const op = emph ? 0.98 : isRil ? (density ? 0.65 : 0.9) : density ? 0.06 : 0.12 + t * 0.72;
             return (
               <path
                 key={p.partner}
                 d={`M ${fx} ${fy} Q ${cx} ${cy} ${px} ${py}`}
                 fill="none"
-                stroke={oddsColor(t)}
-                strokeWidth={(0.6 + wT * 3.6) * (emph ? 1.5 : 1)}
+                stroke={isRil ? RIL_STROKE : oddsColor(t)}
+                strokeWidth={(0.6 + wT * 3.6) * (emph ? 1.5 : isRil ? 1.3 : 1)}
                 strokeOpacity={op}
                 strokeLinecap="round"
                 pathLength={1}
@@ -225,6 +278,24 @@ function GenomeChords(props: ViewProps) {
             );
           })}
         </g>
+
+        {/* circular density histogram (inward radial bars) */}
+        {density && (
+          <g pointerEvents="none">
+            {densBars.map((c, i) => {
+              if (c <= 0) return null;
+              const a = ((i + 0.5) / DENS_BINS) * Math.PI * 2 - Math.PI / 2;
+              const len = (c / densMax) * DENS_LEN;
+              return (
+                <line key={i}
+                  x1={cx + Math.cos(a) * (R - 1)} y1={cy + Math.sin(a) * (R - 1)}
+                  x2={cx + Math.cos(a) * (R - 1 - len)} y2={cy + Math.sin(a) * (R - 1 - len)}
+                  stroke={accent} strokeWidth={2.4} strokeLinecap="round" opacity={0.55}
+                />
+              );
+            })}
+          </g>
+        )}
 
         {/* partner dots */}
         <g>
@@ -235,13 +306,14 @@ function GenomeChords(props: ViewProps) {
             const col = pickColor(p.type);
             const isHi = highlight.has(p.partner);
             const isActive = p.partner === activeName;
+            const isRil = !!rilHits?.has(p.partner);
             return (
               <g key={p.partner}>
                 {isActive && <circle cx={px} cy={py} r={r + 3.5} fill="none" stroke="#0f172a" strokeWidth={1.5} />}
                 <circle
                   cx={px} cy={py} r={r}
-                  fill={isHi ? "#FDE047" : "#fff"}
-                  stroke={col}
+                  fill={isRil ? RIL_FILL : isHi ? "#FDE047" : "#fff"}
+                  stroke={isRil ? RIL_STROKE : col}
                   strokeWidth={2}
                   className="cursor-pointer"
                   style={{ transition: "r 120ms" }}
@@ -282,6 +354,12 @@ function GenomeChords(props: ViewProps) {
 
         {hover && <HoverCard p={hover} x={ptOf(Math.floor((hover.start + hover.end) / 2))[0]} y={ptOf(Math.floor((hover.start + hover.end) / 2))[1]} w={W} />}
       </svg>
+      {density && (
+        <div className="pointer-events-none absolute top-1 left-2 flex items-center gap-1.5 text-[10px] text-slate-500">
+          <BarChart3 className="h-3 w-3" />
+          <span>partners per region · peak {densMax}</span>
+        </div>
+      )}
       <div className="pointer-events-none absolute bottom-1 left-2 flex items-center gap-1.5 text-[10px] text-slate-400">
         <span>odds ratio</span>
         <span className="tabular-nums">0</span>
@@ -295,7 +373,7 @@ function GenomeChords(props: ViewProps) {
 
 // ---------------- Linear scatter ----------------
 function LinearScatter(props: ViewProps) {
-  const { focal, accent, focalAnn, focalTotal, partners, genomeStart, genomeLen, yCap, labelThreshold, sizeScale, highlight, activeName, hover, setHover, onClick, onActivate } = props;
+  const { focal, accent, focalAnn, focalTotal, partners, genomeStart, genomeLen, yCap, labelThreshold, sizeScale, highlight, activeName, hover, setHover, onClick, onActivate, rilHits } = props;
   const W = 900, H = 520;
   const m = { top: 16, right: 120, bottom: 44, left: 60 };
   const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
@@ -354,11 +432,12 @@ function LinearScatter(props: ViewProps) {
           {[...partners].sort((a, b) => b.counts - a.counts).map((p) => {
             const isHi = highlight.has(p.partner);
             const isActive = p.partner === activeName;
+            const isRil = !!rilHits?.has(p.partner);
             const col = pickColor(p.type);
             return (
               <g key={p.partner} transform={`translate(${xS(p.x)},${yS(p.y)})`}>
                 {isActive && <circle r={size(p.counts) + 3.5} fill="none" stroke="#0f172a" strokeWidth={1.5} />}
-                <circle r={size(p.counts)} fill={isHi ? "#FDE047" : "#fff"} stroke={col} strokeWidth={2}
+                <circle r={size(p.counts)} fill={isRil ? RIL_FILL : isHi ? "#FDE047" : "#fff"} stroke={isRil ? RIL_STROKE : col} strokeWidth={2}
                   className="cursor-pointer" onMouseEnter={() => setHover(p)} onMouseLeave={() => setHover(null)}
                   onClick={() => onClick(p.partner)} onDoubleClick={() => onActivate(p.partner)} />
               </g>
@@ -377,7 +456,7 @@ function LinearScatter(props: ViewProps) {
   );
 }
 
-function Legend() {
+function Legend({ showRil }: { showRil?: boolean }) {
   const items = [
     { c: pickColor("CDS"), l: "CDS" },
     { c: pickColor("5'UTR"), l: "5'UTR" },
@@ -395,6 +474,12 @@ function Legend() {
           {it.l}
         </span>
       ))}
+      {showRil && (
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-teal-700">
+          <span className="h-2.5 w-2.5 rounded-full" style={{ background: RIL_FILL, boxShadow: `inset 0 0 0 2px ${RIL_STROKE}` }} />
+          RIL-seq target
+        </span>
+      )}
       <span className="ml-auto text-[11px] text-slate-400">circle area ∝ reads · odds ratio ∝ arc colour (genome) / height (linear)</span>
     </div>
   );

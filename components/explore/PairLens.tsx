@@ -51,25 +51,41 @@ export function PairLens() {
   }, [genomeSeq, fastaUrl]);
 
   // ---- built-in binding-site prediction (RNAduplex-style) ----
+  // Search only the feature ±PRED_FLANK nt (not the whole plotted window), so
+  // base-pairing is sought near the transcript and not in distal flank.
+  const PRED_FLANK = 30;
   const prediction = useMemo<Duplex | null>(() => {
     if (genStatus !== "ready" || !genome || !focalAnn || !xAnn) return null;
-    const s1 = windowSeq(genome, focalAnn, flankY);
-    const s2 = windowSeq(genome, xAnn, flankX);
+    const s1 = windowSeq(genome, focalAnn, PRED_FLANK);
+    const s2 = windowSeq(genome, xAnn, PRED_FLANK);
     if (s1.length < 7 || s2.length < 7) return null;
     return predictDuplex(s1, s2);
-  }, [genome, genStatus, focalAnn, xAnn, flankY, flankX]);
+  }, [genome, genStatus, focalAnn, xAnn]);
 
+  // Map the predicted site (offsets in the ±30 nt window) onto the heatmap's bins
+  // via genomic coordinates, since the predictor and heatmap use different windows.
   const overlay = useMemo(() => {
-    if (!prediction || !m) return null;
+    if (!prediction || !m || !focalAnn || !xAnn || !genome) return null;
+    const gl = genome.length;
+    const offToGenome = (off: number, ann: any) => {
+      const ws = Math.max(1, ann.start - PRED_FLANK), we = Math.min(gl, ann.end + PRED_FLANK);
+      return (ann.strand || "+") === "-" ? we - off : ws + off;
+    };
+    const genomeToBin = (g: number, ann: any, flank: number) => {
+      const ws = Math.max(1, ann.start - flank), we = ann.end + flank;
+      return (ann.strand || "+") === "-" ? Math.floor((we - g) / safeBin) : Math.floor((g - ws) / safeBin);
+    };
+    const yA = genomeToBin(offToGenome(prediction.s1Start, focalAnn), focalAnn, flankY);
+    const yB = genomeToBin(offToGenome(prediction.s1End, focalAnn), focalAnn, flankY);
+    const xA = genomeToBin(offToGenome(prediction.s2Start, xAnn), xAnn, flankX);
+    const xB = genomeToBin(offToGenome(prediction.s2End, xAnn), xAnn, flankX);
     const clampY = (v: number) => Math.max(0, Math.min(m.bins_y - 1, v));
     const clampX = (v: number) => Math.max(0, Math.min(m.bins_x - 1, v));
     return {
-      y0: clampY(Math.floor(prediction.s1Start / safeBin)),
-      y1: clampY(Math.floor(prediction.s1End / safeBin)),
-      x0: clampX(Math.floor(prediction.s2Start / safeBin)),
-      x1: clampX(Math.floor(prediction.s2End / safeBin)),
+      y0: clampY(Math.min(yA, yB)), y1: clampY(Math.max(yA, yB)),
+      x0: clampX(Math.min(xA, xB)), x1: clampX(Math.max(xA, xB)),
     };
-  }, [prediction, m, safeBin]);
+  }, [prediction, m, safeBin, focalAnn, xAnn, genome, flankY, flankX]);
 
   const accent = pickColor(focalAnn?.feature_type);
   const dispY = formatGeneName(focal, focalAnn?.feature_type);
@@ -133,8 +149,8 @@ export function PairLens() {
         prediction={prediction}
         genStatus={genStatus}
         accent={accent}
-        flankY={flankY}
-        flankX={flankX}
+        flankY={PRED_FLANK}
+        flankX={PRED_FLANK}
         dispY={dispY}
         dispX={dispX}
       />
@@ -166,7 +182,7 @@ function PredictionPanel({ prediction, genStatus, accent, flankY, flankX, dispY,
       ) : genStatus === "none" ? (
         <div className="py-2 text-sm text-slate-400">Sequence-based prediction is available for the bundled species and the demo (it needs a genome to read the RNA sequences).</div>
       ) : !prediction ? (
-        <div className="py-2 text-sm text-slate-400">No stable duplex (≤ −5 kcal/mol) predicted within this window. Try widening the flanks.</div>
+        <div className="py-2 text-sm text-slate-400">No stable duplex (≤ −5 kcal/mol) predicted within ±30 nt of these features.</div>
       ) : (
         <div className="space-y-2.5">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
@@ -185,7 +201,7 @@ ${pad(dispX.text)} 3′-${prediction.bot}-5′`}
           </div>
 
           <div className="text-[11px] leading-relaxed text-slate-400">
-            Dashed box on the map marks this site. Built-in estimate (Watson–Crick + G·U, nearest-neighbour energies); approximates IntaRNA's seed but omits the accessibility term — treat ΔG as an estimate. Site positions are relative to each RNA's 5′ end (≤ 0 = upstream flank).
+            Dashed box on the map marks this site. Searched within ±30 nt of each feature. Built-in estimate (Watson–Crick + G·U, nearest-neighbour energies); approximates IntaRNA's seed but omits the accessibility term — treat ΔG as an estimate. Site positions are relative to each RNA's 5′ end (≤ 0 = upstream flank).
           </div>
         </div>
       )}

@@ -203,14 +203,14 @@ function GenomeChords(props: ViewProps) {
 
   const sorted = useMemo(() => [...partners].sort((a, b) => a.rawY - b.rawY), [partners]);
 
-  // density "heat ring": local target density in a sliding genomic window mapped
-  // to colour intensity on a thin band just inside the ring — a localized cluster
-  // of targets lights up as a bright arc, an even spread stays faint.
-  const densSegments = useMemo(() => {
-    const N = Math.max(90, Math.min(720, Math.round(genomeLen / 8000))); // ~8-kb segments
-    const half = Math.max(1, Math.round(N * 0.012)); // sliding window ≈ ±1.2% of genome
+  // density: count of interaction partners (odds ratio > 5) in a sliding genomic
+  // window, drawn as a linear radial curve OUTSIDE the genome ring.
+  const densCurve = useMemo(() => {
+    const N = 360;
+    const half = Math.max(1, Math.round(N * 0.015)); // sliding window ≈ ±1.5% of genome
     const raw = new Array(N).fill(0);
     for (const p of partners) {
+      if (p.rawY <= 5) continue; // specific interactions only
       const mid = (p.start + p.end) / 2;
       const bi = Math.min(N - 1, Math.max(0, Math.floor(((mid - genomeStart) / genomeLen) * N)));
       raw[bi]++;
@@ -281,24 +281,26 @@ function GenomeChords(props: ViewProps) {
           })}
         </g>
 
-        {/* density heat-ring: a localized cluster of targets glows as a bright arc */}
-        {density && (
-          <g pointerEvents="none">
-            {densSegments.dens.map((c, i) => {
-              if (c <= 0) return null;
-              const a = ((i + 0.5) / densSegments.N) * Math.PI * 2 - Math.PI / 2;
-              const t = c / densSegments.max;
-              const aw = (2 * Math.PI * (R - 9)) / densSegments.N + 1.4;
-              return (
-                <line key={i}
-                  x1={cx + Math.cos(a) * (R - 2)} y1={cy + Math.sin(a) * (R - 2)}
-                  x2={cx + Math.cos(a) * (R - 16)} y2={cy + Math.sin(a) * (R - 16)}
-                  stroke={accent} strokeWidth={aw} strokeOpacity={0.1 + t * 0.8}
-                />
-              );
-            })}
-          </g>
-        )}
+        {/* density curve OUTSIDE the ring: partners (OR > 5) per genomic window, linear */}
+        {density && (() => {
+          const { N, dens, max } = densCurve;
+          const BASE = R + 24, AMP = 48;
+          const pt = (i: number, rr: number) => {
+            const a = ((i + 0.5) / N) * Math.PI * 2 - Math.PI / 2;
+            return `${(cx + Math.cos(a) * rr).toFixed(1)} ${(cy + Math.sin(a) * rr).toFixed(1)}`;
+          };
+          const outer = dens.map((c, i) => pt(i, BASE + (c / max) * AMP));
+          const base = dens.map((_, i) => pt(i, BASE));
+          const area = `M ${outer.join(" L ")} L ${base.reverse().join(" L ")} Z`;
+          const line = `M ${outer.join(" L ")} Z`;
+          return (
+            <g pointerEvents="none">
+              <circle cx={cx} cy={cy} r={BASE} fill="none" stroke="#cbd5e1" strokeWidth={0.75} strokeDasharray="2 3" />
+              <path d={area} fill={accent} fillOpacity={0.13} />
+              <path d={line} fill="none" stroke={accent} strokeWidth={1.5} strokeOpacity={0.85} strokeLinejoin="round" />
+            </g>
+          );
+        })()}
 
         {/* partner dots */}
         <g>
@@ -330,8 +332,8 @@ function GenomeChords(props: ViewProps) {
           })}
         </g>
 
-        {/* partner labels — radial, so more names fit around the ring */}
-        {labels.map((p) => {
+        {/* partner labels — radial; hidden in density mode so the curve reads */}
+        {!density && labels.map((p) => {
           const mid = Math.floor((p.start + p.end) / 2);
           const a = ang(mid);
           const [lx, ly] = ptOf(mid, R + 16);
@@ -361,7 +363,7 @@ function GenomeChords(props: ViewProps) {
       {density && (
         <div className="pointer-events-none absolute top-1 left-2 flex items-center gap-1.5 text-[10px] text-slate-500">
           <BarChart3 className="h-3 w-3" />
-          <span>local target density · clusters glow brighter</span>
+          <span>partner density (odds ratio &gt; 5)</span>
         </div>
       )}
       <div className="pointer-events-none absolute bottom-1 left-2 flex items-center gap-1.5 text-[10px] text-slate-400">

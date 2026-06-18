@@ -45,9 +45,9 @@ function kindOf(a: string, b: string): Kind {
   return 0;
 }
 
-export function predictDuplex(seq1: string, seq2: string, seedLen = 7): Duplex | null {
+export function predictDuplexes(seq1: string, seq2: string, seedLen = 7, topN = 2): Duplex[] {
   const n1 = seq1.length, n2 = seq2.length;
-  if (n1 < seedLen || n2 < seedLen) return null;
+  if (n1 < seedLen || n2 < seedLen) return [];
 
   // P[k] = WC-complement of reverse(seq2)[k]. seq1[a] WC-pairs seq2[b] (b = n2-1-k)
   // iff seq1[a] === P[k]; a contiguous WC helix is then a diagonal a-k = const.
@@ -62,7 +62,7 @@ export function predictDuplex(seq1: string, seq2: string, seedLen = 7): Duplex |
     if (arr) arr.push(k); else seeds.set(key, [k]);
   }
 
-  let best: Duplex | null = null;
+  const cands: Duplex[] = [];
   const seen = new Set<number>();
   let nSeed = 0;
   const MAX_SEEDS = 8000;
@@ -120,18 +120,34 @@ export function predictDuplex(seq1: string, seq2: string, seedLen = 7): Duplex |
       };
       dG += term(aL) + term(aR);
 
-      if (!best || dG < best.dG) {
-        best = {
+      if (m >= seedLen && dG <= -5) {
+        cands.push({
           s1Start: aL, s1End: aR,
           s2Start: bOf(aR), s2End: bOf(aL), // bOf decreases with offset → [min,max]
           pairs: m, gu, dG,
           top, mid, bot,
-        };
+        });
       }
     }
   }
 
-  // require a meaningfully stable duplex
-  if (best && (best.pairs < seedLen || best.dG > -5)) return null;
-  return best;
+  // pick the top-N most stable, mutually SEPARATE sites (so they don't overlap on
+  // both axes — i.e. they sit at distinct positions on the contact map)
+  cands.sort((x, y) => x.dG - y.dG);
+  const M = 6; // nt margin when deciding two sites are the same
+  const sameSite = (x: Duplex, c: Duplex) =>
+    x.s1Start - M <= c.s1End && c.s1Start - M <= x.s1End &&
+    x.s2Start - M <= c.s2End && c.s2Start - M <= x.s2End;
+  const picked: Duplex[] = [];
+  for (const c of cands) {
+    if (picked.some((p) => sameSite(p, c))) continue;
+    picked.push(c);
+    if (picked.length >= topN) break;
+  }
+  return picked;
+}
+
+/** Convenience: the single most stable duplex (or null). */
+export function predictDuplex(seq1: string, seq2: string, seedLen = 7): Duplex | null {
+  return predictDuplexes(seq1, seq2, seedLen, 1)[0] ?? null;
 }

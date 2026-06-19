@@ -24,6 +24,12 @@ export function InteractomeLens() {
   const [ril, setRil] = useState(false);
   const [rilSet, setRilSet] = useState<Set<string> | null>(null);
   const [density, setDensity] = useState(false);
+  const [orFilter, setOrFilter] = useState(false); // show only OR ≥ 5
+
+  const shownPartners = useMemo(
+    () => (orFilter ? partners.filter((p) => p.rawY >= 5) : partners),
+    [orFilter, partners]
+  );
 
   useEffect(() => {
     if (ril && !rilSet) loadRilPairs().then(setRilSet).catch(() => {});
@@ -47,7 +53,7 @@ export function InteractomeLens() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <div className="text-sm font-semibold text-slate-800">Interactome</div>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">{partners.length} partners</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">{shownPartners.length} partners</span>
         </div>
         <div className="flex items-center gap-1.5">
           <div className="flex rounded-lg bg-slate-100 p-0.5">
@@ -93,16 +99,17 @@ export function InteractomeLens() {
         {view === "genome" ? (
           <GenomeChords
             focal={focal} accent={accent} focalAnn={focalAnn} focalTotal={focalTotal}
-            partners={partners} genomeStart={genomeStart} genomeLen={genomeLen}
+            partners={shownPartners} genomeStart={genomeStart} genomeLen={genomeLen}
             yCap={yCap} labelThreshold={labelThreshold} sizeScale={sizeScale}
             highlight={highlight} activeName={activeName} hover={hover} setHover={setHover}
             onClick={setFocal} onActivate={(g) => setActivePartner(g)}
             density={density} rilHits={rilHits}
+            orFilter={orFilter} onOrFilter={() => setOrFilter((v) => !v)}
           />
         ) : (
           <LinearScatter
             focal={focal} accent={accent} focalAnn={focalAnn} focalTotal={focalTotal}
-            partners={partners} genomeStart={genomeStart} genomeLen={genomeLen}
+            partners={shownPartners} genomeStart={genomeStart} genomeLen={genomeLen}
             yCap={yCap} labelThreshold={labelThreshold} sizeScale={sizeScale}
             highlight={highlight} activeName={activeName} hover={hover} setHover={setHover}
             onClick={setFocal} onActivate={(g) => setActivePartner(g)}
@@ -124,6 +131,7 @@ type ViewProps = {
   hover: PartnerRow | null; setHover: (p: PartnerRow | null) => void;
   onClick: (g: string) => void; onActivate: (g: string) => void;
   density?: boolean; rilHits?: Set<string> | null;
+  orFilter?: boolean; onOrFilter?: () => void;
 };
 
 function HoverCard({ p, x, y, w }: { p: PartnerRow; x: number; y: number; w: number }) {
@@ -150,7 +158,7 @@ function HoverCard({ p, x, y, w }: { p: PartnerRow; x: number; y: number; w: num
 
 // ---------------- Circos-style genome chords ----------------
 function GenomeChords(props: ViewProps) {
-  const { focal, accent, focalAnn, focalTotal, partners, genomeStart, genomeLen, labelThreshold, sizeScale, highlight, activeName, hover, setHover, onClick, onActivate, density, rilHits } = props;
+  const { focal, accent, focalAnn, focalTotal, partners, genomeStart, genomeLen, labelThreshold, sizeScale, highlight, activeName, hover, setHover, onClick, onActivate, density, rilHits, orFilter, onOrFilter } = props;
   const W = 760, H = 660;
   const cx = W / 2, cy = H / 2 + 4;
   const R = 244;
@@ -371,6 +379,13 @@ function GenomeChords(props: ViewProps) {
         <span className="tabular-nums">0</span>
         <span className="inline-block h-2 w-20 rounded" style={{ background: `linear-gradient(to right, ${oddsColor(0)}, ${oddsColor(0.5)}, ${oddsColor(1)})` }} />
         <span className="tabular-nums">{orHigh >= 1000 ? `${(orHigh / 1000).toFixed(1)}k` : Math.round(orHigh)}</span>
+        <button
+          onClick={onOrFilter}
+          title="Show only targets with odds ratio ≥ 5"
+          className={`pointer-events-auto ml-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold transition ${orFilter ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
+        >
+          OR ≥ 5
+        </button>
       </div>
       <div className="pointer-events-none absolute bottom-1 right-2 text-[10px] text-slate-400">click = refocus · double-click = pair view</div>
     </div>

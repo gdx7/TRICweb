@@ -102,6 +102,7 @@ export function PartnersPanel({ onOpenPair }: { onOpenPair: () => void }) {
             const col = pickColor(p.type);
             const isActive = p.partner === activeName;
             const isPinned = pinned.includes(p.partner);
+            const plink = dbLink(p.partner);
             return (
               <li key={p.partner}>
                 <div
@@ -122,6 +123,11 @@ export function PartnersPanel({ onOpenPair }: { onOpenPair: () => void }) {
                     <button title="Open pair contact map" onClick={(e) => { e.stopPropagation(); setActivePartner(p.partner); onOpenPair(); }} className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-slate-200">
                       <Grid2x2 className="h-3 w-3" />
                     </button>
+                    {plink && (
+                      <a title="Open in gene database" href={plink} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-slate-200">
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
                   </div>
                   {isPinned && <Pin className="h-3 w-3 shrink-0 text-slate-900 group-hover:hidden" />}
                 </div>

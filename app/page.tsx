@@ -12,7 +12,7 @@ type Bubble = { top: number; left: number; size: number; color: string; delay: n
 export default function Home() {
   const bubbles = useMemo<Bubble[]>(() => {
     const rand = (a: number, b: number) => a + Math.random() * (b - a);
-    return Array.from({ length: 26 }).map(() => ({
+    return Array.from({ length: 13 }).map(() => ({
       top: rand(5, 80),
       left: rand(5, 90),
       size: rand(60, 220),
@@ -91,17 +91,19 @@ export default function Home() {
       {/* ORIGINAL LEGACY TOOLS */}
       <section className="relative mx-auto max-w-6xl px-6 pb-20 pt-6">
         <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-sm font-semibold tracking-tight text-slate-600">Original legacy tools</h2>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-400">legacy</span>
+          <h2 className="text-sm font-semibold tracking-tight text-slate-600">Legacy tools</h2>
+          <span className="text-[11px] text-slate-400">
+            (with <a href="https://doi.org/10.1101/2025.09.11.675593" target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-slate-600">original preprint</a>)
+          </span>
         </div>
         <p className="mb-4 max-w-2xl text-xs text-slate-400">
           The original standalone tools, superseded by the Explorer above — kept for reference and focused single-analysis workflows.
         </p>
         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
           <LegacyCard title="globalMAP" href="/global" desc="Global interaction map" icon={Orbit} />
-          <LegacyCard title="csMAP" href="/csmap" desc="Comparative target profiles" icon={Columns3} />
           <LegacyCard title="pairMAP" href="/pairmap" desc="Inter-RNA heatmaps" icon={Grid2x2} />
           <LegacyCard title="foldMAP" href="/foldmap" desc="Structural contact maps" icon={Atom} />
+          <LegacyCard title="csMAP" href="/csmap" desc="Comparative target profiles" icon={Columns3} />
         </div>
       </section>
     </div>

@@ -362,11 +362,25 @@ export default function HelpPage() {
 
             <figure className="my-3">
               <div className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white p-2">
-                <img src="/explore-interactome.svg" alt="Interactome lens — circular genome view of a focal RNA and its partners" className="mx-auto block max-w-full h-auto" />
+                <img src="/explore-interactome.svg" alt="Interactome lens — circular genome view of the sRNA GcvB and its partners in E. coli" className="mx-auto block max-w-full h-auto" />
               </div>
               <figcaption className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Interactome (Genome view). Chords fan out from the focal RNA to each partner; arc colour =
-                odds ratio, arc width = read depth, dot area = reads, dot colour = feature class.
+                Interactome (Genome view) of the sRNA <em>GcvB</em> in <em>E. coli</em>. Chords fan out
+                from the focal RNA to each partner; arc colour = odds ratio, arc width = read depth, dot
+                area = reads, dot outline = feature class. GcvB&apos;s top partners are the 5′UTRs of its
+                amino‑acid–transport regulon (<em>oppA</em>, <em>dppA</em>, <em>argT</em>, <em>sstT</em>…).
+              </figcaption>
+            </figure>
+
+            <figure className="my-3">
+              <div className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white p-2">
+                <img src="/explore-interactome-ril.svg" alt="Interactome with the RIL-seq overlay — GcvB partners that are known RIL-seq targets shown in teal" className="mx-auto block max-w-full h-auto" />
+              </div>
+              <figcaption className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                The same view with the <strong>RIL‑seq overlay</strong> on. Teal chords/dots mark partners
+                that are independently known RIL‑seq targets (Melamed et al. 2016); the button reads{" "}
+                <strong>RIL‑seq (19)</strong> — here every one of GcvB&apos;s high‑confidence TRIC‑seq
+                partners is corroborated, a quick visual cross‑check of new vs. validated targets.
               </figcaption>
             </figure>
 
@@ -378,7 +392,7 @@ export default function HelpPage() {
 
             <h4 className="font-semibold mt-2">Controls</h4>
             <ul className="list-disc pl-6 space-y-1">
-              <li><strong>RIL‑seq</strong> — (E. coli) highlights partners that are known RIL‑seq targets (Melamed et al. 2016) in teal, so you can see what is corroborated vs. novel.</li>
+              <li><strong>RIL‑seq</strong> — (E. coli) highlights partners that are known RIL‑seq targets (Melamed et al. 2016) in teal, so you can see what is corroborated vs. novel (see the overlay figure above).</li>
               <li><strong>Density</strong> — (Genome view) overlays a circular histogram of specific partners (<em>O</em><sup>f</sup> &gt; 5) per genomic window, revealing interaction hot‑regions.</li>
               <li><strong>OR ≥ 5</strong> — the chip by the colour bar drops unspecific partners and keeps only enriched ones.</li>
               <li><strong>Shuffle</strong> — jump to a random, well‑connected RNA — a good way to start exploring.</li>
@@ -406,11 +420,13 @@ export default function HelpPage() {
 
             <figure className="my-3">
               <div className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white p-2">
-                <img src="/explore-pair.svg" alt="Pair lens — base-pairing contact map between a focal RNA and a partner" className="mx-auto block max-w-full h-auto" />
+                <img src="/explore-pair.svg" alt="Pair lens — base-pairing contact map between GcvB and the 5' UTR of oppA" className="mx-auto block max-w-full h-auto" />
               </div>
               <figcaption className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Pair contact map (focal × partner). Axis ticks mark −flank / start / end / +flank of each
-                transcript; colour = read depth. A cross marks the predicted base‑pairing site.
+                Pair contact map for <em>GcvB</em> (Y) × the 5′UTR of <em>oppA</em> (X) — a textbook GcvB
+                target. The contact hotspot pins the interface to GcvB&apos;s conserved R1 region; axis ticks
+                mark −flank / start / end / +flank, colour = read depth, and the cross marks the predicted
+                base‑pairing site.
               </figcaption>
             </figure>
 
@@ -454,8 +470,9 @@ export default function HelpPage() {
                 <img src="/explore-structure.svg" alt="Structure lens — intramolecular self-contact matrix and long-range profile" className="mx-auto block max-w-full h-auto" />
               </div>
               <figcaption className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Structure lens. Left: the symmetric self‑contact matrix (5′→3′ on both axes, gene body
-                framed, flanks shaded). Right: the long‑range (&gt; 5 kb) contact profile, with maxima marked.
+                Structure lens for <em>GcvB</em>. Left: the symmetric self‑contact matrix (5′→3′ on both
+                axes, gene body framed, flanks shaded). Right: the long‑range (&gt; 5 kb) contact profile,
+                with maxima marked.
               </figcaption>
             </figure>
 
@@ -489,11 +506,13 @@ export default function HelpPage() {
 
             <figure className="my-3">
               <div className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white p-2">
-                <img src="/explore-compare.svg" alt="Compare lens — target spectra of several RNAs side by side" className="mx-auto block max-w-full h-auto" />
+                <img src="/explore-compare.svg" alt="Compare lens — target spectra of GcvB, 5'oppA, SroC and CsrB side by side" className="mx-auto block max-w-full h-auto" />
               </div>
               <figcaption className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Compare lens. Each column is one RNA; dots are its distal targets (y = odds ratio, area =
-                reads, colour = target class). The lower panel shows total interactions per RNA (log scale).
+                Compare lens: <em>GcvB</em> (focal) against its target <em>5′oppA</em>, its sponge{" "}
+                <em>SroC</em>, and the unrelated sRNA <em>CsrB</em>. Each column&apos;s dots are that RNA&apos;s
+                distal targets (y = odds ratio, area = reads, colour = target class); the lower panel shows
+                total interactions per RNA (log scale) — GcvB&apos;s hub connectivity towers over the rest.
               </figcaption>
             </figure>
 

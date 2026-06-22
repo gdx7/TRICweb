@@ -77,8 +77,8 @@
     <!-- focal -->
     <circle r="46" fill="#A40194" opacity="0.10"/>
     <circle cx="0" cy="-120" r="6" fill="#A40194" stroke="#fff" stroke-width="2"/>
-    <text y="-2" text-anchor="middle" font-size="17" font-weight="800" fill="#0f172a">RyhB</text>
-    <text y="15" text-anchor="middle" font-size="10" fill="#94a3b8">sRNA · 1,332 interactions</text>
+    <text y="-2" text-anchor="middle" font-size="17" font-weight="800" fill="#0f172a">GcvB</text>
+    <text y="15" text-anchor="middle" font-size="10" fill="#94a3b8">sRNA · 9,153 interactions</text>
   </g>
   <text x="320" y="462" text-anchor="middle" font-size="10.5" fill="#cbd5e1">Genome / Linear · click a partner to refocus</text>
 
@@ -86,10 +86,10 @@
   <rect x="620" y="146" width="300" height="326" rx="14" fill="#ffffff" stroke="#eef2f7" stroke-width="1.5"/>
   <rect x="620" y="146" width="300" height="74" rx="14" fill="#A40194" opacity="0.06"/>
   <circle cx="642" cy="178" r="6" fill="#fff" stroke="#A40194" stroke-width="3"/>
-  <text x="658" y="183" font-size="15" font-weight="700" fill="#0f172a">RyhB</text>
-  <text x="636" y="204" font-size="10" fill="#64748b">sRNA · 3,790,000–3,790,090 · −</text>
+  <text x="658" y="183" font-size="15" font-weight="700" fill="#0f172a">GcvB</text>
+  <text x="636" y="204" font-size="10" fill="#64748b">sRNA/ncRNA · ~206 nt · regulatory hub</text>
   <rect x="636" y="226" width="128" height="36" rx="8" fill="#ffffff" stroke="#eef2f7"/>
-  <text x="648" y="244" font-size="13" font-weight="700" fill="#0f172a">1,332</text>
+  <text x="648" y="244" font-size="13" font-weight="700" fill="#0f172a">9,153</text>
   <text x="648" y="256" font-size="8.5" fill="#94a3b8" letter-spacing="0.5">INTERACTIONS</text>
   <rect x="776" y="226" width="128" height="36" rx="8" fill="#ffffff" stroke="#eef2f7"/>
   <text x="788" y="244" font-size="13" font-weight="700" fill="#0f172a">16</text>
@@ -98,22 +98,22 @@
   <g font-size="11.5">
     <g>
       <circle cx="644" cy="288" r="4.5" fill="#fff" stroke="#76AAD7" stroke-width="2.5"/>
-      <text x="658" y="292" fill="#334155" font-style="italic">sodB</text>
+      <text x="658" y="292" fill="#334155" font-style="italic">5'oppA</text>
       <text x="892" y="292" text-anchor="end" font-weight="700" fill="#334155">412</text>
     </g>
     <g>
       <circle cx="644" cy="316" r="4.5" fill="#fff" stroke="#76AAD7" stroke-width="2.5"/>
-      <text x="658" y="320" fill="#334155" font-style="italic">sdhC</text>
+      <text x="658" y="320" fill="#334155" font-style="italic">5'dppA</text>
       <text x="892" y="320" text-anchor="end" font-weight="700" fill="#334155">241</text>
     </g>
     <g>
-      <circle cx="644" cy="344" r="4.5" fill="#fff" stroke="#F78208" stroke-width="2.5"/>
-      <text x="658" y="348" fill="#334155" font-style="italic">fumA</text>
+      <circle cx="644" cy="344" r="4.5" fill="#fff" stroke="#76AAD7" stroke-width="2.5"/>
+      <text x="658" y="348" fill="#334155" font-style="italic">5'argT</text>
       <text x="892" y="348" text-anchor="end" font-weight="700" fill="#334155">188</text>
     </g>
     <g>
-      <circle cx="644" cy="372" r="4.5" fill="#fff" stroke="#F12C2C" stroke-width="2.5"/>
-      <text x="658" y="376" fill="#334155">RyhB-sponge</text>
+      <circle cx="644" cy="372" r="4.5" fill="#fff" stroke="#A40194" stroke-width="2.5"/>
+      <text x="658" y="376" fill="#334155">SroC</text>
       <text x="892" y="376" text-anchor="end" font-weight="700" fill="#334155">96</text>
     </g>
   </g>

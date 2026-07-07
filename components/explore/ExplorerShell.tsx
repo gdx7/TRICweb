@@ -124,7 +124,7 @@ function FiltersButton() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  const active = minCounts !== 5 || yCap !== 5000 || labelThreshold !== 50 || excludeTypes.length !== 1 || highlight.size > 0;
+  const active = minCounts !== 5 || yCap !== 1000 || labelThreshold !== 10 || excludeTypes.length !== 1 || highlight.size > 0;
 
   const applyHl = (s: string) => {
     setHl(s);

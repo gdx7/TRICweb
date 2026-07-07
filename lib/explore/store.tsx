@@ -207,10 +207,10 @@ export function ExplorerProvider({ children }: { children: React.ReactNode }) {
   const [highlight, setHighlight] = useState<Set<string>>(new Set());
 
   const [minCounts, setMinCounts] = useState(5);
-  const [yCap, setYCap] = useState(5000);
-  const [labelThreshold, setLabelThreshold] = useState(50);
+  const [yCap, setYCap] = useState(1000);
+  const [labelThreshold, setLabelThreshold] = useState(10);
   const [excludeTypes, setExcludeTypes] = useState<FeatureType[]>(["tRNA"]);
-  const [sizeScale, setSizeScale] = useState(1);
+  const [sizeScale, setSizeScale] = useState(0.5);
   const [sortKey, setSortKey] = useState<SortKey>("odds_ratio");
   const [sortDesc, setSortDesc] = useState(true);
 
@@ -346,7 +346,9 @@ export function ExplorerProvider({ children }: { children: React.ReactNode }) {
         setContacts([]);
         setPinned([]);
         setDataStatus("loaded");
-        setFocal(chooseDefaultFocal(ann, pr));
+        const wanted = src.defaultFocal?.toLowerCase();
+        const match = wanted ? ann.find((a) => a.gene_name.toLowerCase() === wanted) : undefined;
+        setFocal(match ? match.gene_name : chooseDefaultFocal(ann, pr));
       } catch (e: any) {
         if (token !== loadToken.current) return;
         setDataError(e?.message || "Failed to load dataset");

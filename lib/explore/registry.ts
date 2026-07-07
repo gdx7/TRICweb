@@ -26,6 +26,8 @@ export type SpeciesSource = {
   fastaUrl: string;
   /** Key used to build external gene-database deep links. */
   dbKey: DbKey;
+  /** Preferred focal RNA to show first when this species loads (falls back to the most-connected sRNA). */
+  defaultFocal?: string;
 };
 
 const BLOB = "https://6xaweu7axahancgd.public.blob.vercel-storage.com";
@@ -42,6 +44,7 @@ export const SPECIES: SpeciesSource[] = [
     structureUrl: `${BLOB}/chimera_EC_all.bed`,
     fastaUrl: "/EC.fasta",
     dbKey: "EC",
+    defaultFocal: "GcvB",
   },
   {
     id: "SA",
